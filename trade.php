@@ -20,6 +20,7 @@ use Trade\Listings\Service as ListingsService;
 use Trade\Merchant\Service as MerchantService;
 use Trade\Search\Service as SearchService;
 use Trade\Telegram\Webhook;
+use Trade\Telegram\Diagnostics as TelegramDiagnostics;
 use Trade\Orders\Service as OrdersService;
 use Trade\Requests\Service as RequestsService;
 use Trade\Verification\Service as VerificationService;
@@ -31,6 +32,12 @@ use Trade\MiniApp\Service as MiniAppService;
 
 register_activation_hook( __FILE__, array( Db::class, 'install' ) );
 add_action( 'plugins_loaded', array( AdminService::class, 'boot' ) );
+
+// Register diagnostics directly from the main plugin bootstrap. This keeps the
+// admin diagnostic screen available even if another module's boot sequence fails.
+add_action( 'admin_menu', array( TelegramDiagnostics::class, 'menu' ), 99 );
+add_action( 'admin_post_trade_telegram_diagnostics', array( TelegramDiagnostics::class, 'run' ) );
+
 add_action( 'admin_init', array( Db::class, 'maybe_upgrade' ) );
 add_action( 'rest_api_init', array( Rest::class, 'register_routes' ) );
 add_action( 'rest_api_init', array( CatalogService::class, 'routes' ) );
