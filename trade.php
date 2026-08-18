@@ -33,9 +33,23 @@ use Trade\MiniApp\Service as MiniAppService;
 register_activation_hook( __FILE__, array( Db::class, 'install' ) );
 add_action( 'plugins_loaded', array( AdminService::class, 'boot' ) );
 
-// Register diagnostics directly from the main plugin bootstrap. This keeps the
-// admin diagnostic screen available even if another module's boot sequence fails.
-add_action( 'admin_menu', array( TelegramDiagnostics::class, 'menu' ), 99 );
+// Temporary direct top-level diagnostic entry. This deliberately bypasses the
+// Trade parent-menu registration so the Telegram API test remains reachable
+// while the admin menu architecture is being stabilized.
+add_action( 'admin_menu', function () {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		return;
+	}
+	add_menu_page(
+		'Telegram Diagnostics',
+		'Telegram Diagnostics',
+		'manage_options',
+		'trade-telegram-diagnostics',
+		array( TelegramDiagnostics::class, 'render' ),
+		'dashicons-telegram',
+		3
+	);
+}, 1 );
 add_action( 'admin_post_trade_telegram_diagnostics', array( TelegramDiagnostics::class, 'run' ) );
 
 add_action( 'admin_init', array( Db::class, 'maybe_upgrade' ) );
@@ -53,8 +67,5 @@ add_action( 'rest_api_init', array( NotificationsService::class, 'routes' ) );
 add_action( 'rest_api_init', array( AIService::class, 'routes' ) );
 add_action( 'rest_api_init', array( MiniAppService::class, 'routes' ) );
 
-// Verification revocation pauses active listings.
 add_action( 'trade.MERCHANT_VERIFICATION_REVOKED', array( ListingsService::class, 'pause_on_revocation' ) );
-
-// Identity grants tb_session to authenticated Trade users; service-layer checks still apply.
 add_filter( 'user_has_cap', array( Sessions::class, 'grant_trade_caps' ), 10, 3 );
