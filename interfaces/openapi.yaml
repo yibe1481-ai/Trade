@@ -1,0 +1,1721 @@
+openapi: 3.0.3
+info:
+  title: Trade Bot API
+  version: 0.2.1
+  description: "REST surface of the Trade Bot WordPress plugin. Envelope on every response: `{success, data?, meta?, error?}`. Errors carry `error.code` (see interfaces/ERRORS.md). All routes under `trade/v1` (namespace prefix; WP REST mounts `/wp-json/trade/v1/...`)."
+servers:
+  - url: https://trade.cleartools.net/wp-json/trade/v1
+tags:
+  - name: identity
+  - name: telegram
+  - name: catalog
+  - name: merchant
+  - name: orders
+  - name: requests
+  - name: trust_safety
+  - name: notifications
+paths:
+  /auth/session:
+    post:
+      tags: [identity]
+      summary: Exchange Telegram MiniApp initData for a session token (login).
+      description: >
+        Public. Verify the HMAC-signed initData against the bot token, apply the
+        300 s replay window and the 10/min-per-Telegram-id rate limit, then issue
+        a Bearer session. `session_token` is returned exactly once; only its
+        SHA-256 hash is stored. Never log or echo back init_data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [init_data]
+              properties:
+                init_data:
+                  type: string
+                  maxLength: 32768
+                  description: Raw initData string from Telegram.MiniApp.
+      responses:
+        '200':
+          description: Session issued (or renewed).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: object
+                    properties:
+                      session_token: {type: string}
+                      expires_at: {type: string, format: date-time, description: ISO-8601 UTC}
+                      onboarding_state: {type: string, enum: [none]}
+                      role: {type: string, enum: [customer]}
+                  request_id: {type: string}
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '429':
+          $ref: '#/components/responses/RATE_LIMITED'
+  /me:
+    get:
+      tags: [identity]
+      summary: Read own identity + customer profile.
+      security:
+        - bearerSession: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: object
+                    properties:
+                      language: {type: string, example: en}
+                      display_name: {type: string}
+                      location_id: {type: [integer, 'null']}
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '403':
+          $ref: '#/components/responses/FORBIDDEN'
+    patch:
+      tags: [identity]
+      summary: Update own profile (any subset of the three fields).
+      security:
+        - bearerSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                language:
+                  type: string
+                  description: Must be an enabled code in tb_languages.
+                display_name:
+                  type: string
+                  maxLength: 100
+                location_id:
+                  type: [integer, 'null']
+                  description: Must reference an existing catalog location.
+      responses:
+        '200':
+          $ref: '#/components/responses/ME_OK'
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '403':
+          $ref: '#/components/responses/FORBIDDEN'
+        '404':
+          $ref: '#/components/responses/LOCATION_NOT_FOUND'
+  /categories:
+    get:
+      tags: [catalog]
+      summary: List catalog categories.
+      parameters:
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: per_page
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+        - name: type
+          in: query
+          schema: {type: string, enum: [product, service]}
+        - name: active
+          in: query
+          schema: {type: boolean}
+        - name: parent_id
+          in: query
+          schema: {type: integer, minimum: 1}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: integer}
+                        parent_id: {type: [integer, 'null']}
+                        slug: {type: string}
+                        name_key: {type: string}
+                        name: {type: string}
+                        type: {type: string}
+                        active: {type: boolean}
+                  meta:
+                    type: object
+                    properties:
+                      page: {type: integer}
+                      per_page: {type: integer}
+                      total: {type: integer}
+                      has_more: {type: boolean}
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+  /categories/{id}/attributes:
+    get:
+      tags: [catalog]
+      summary: Read dynamic attributes for a category.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: per_page
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: integer}
+                        category_id: {type: integer}
+                        key: {type: string}
+                        label_key: {type: string}
+                        label: {type: string}
+                        data_type: {type: string}
+                        required: {type: boolean}
+                        options_json:
+                          type: array
+                          items: {}
+                        sort: {type: integer}
+                  meta:
+                    type: object
+                    properties:
+                      page: {type: integer}
+                      per_page: {type: integer}
+                      total: {type: integer}
+                      has_more: {type: boolean}
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '404':
+          $ref: '#/components/responses/CATEGORY_NOT_FOUND'
+  /merchants:
+    post:
+      tags: [merchant]
+      summary: Create the caller's merchant profile.
+      security:
+        - bearerSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [business_name, merchant_type, location_id]
+              properties:
+                business_name:
+                  type: string
+                  maxLength: 255
+                merchant_type:
+                  type: string
+                  maxLength: 50
+                location_id:
+                  type: integer
+                  minimum: 1
+      responses:
+        '200':
+          $ref: '#/components/responses/MERCHANT_OK'
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '403':
+          $ref: '#/components/responses/FORBIDDEN'
+        '404':
+          $ref: '#/components/responses/LOCATION_NOT_FOUND'
+  /merchants/{id}:
+    get:
+      tags: [merchant]
+      summary: Public merchant profile read.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+      responses:
+        '200':
+          $ref: '#/components/responses/MERCHANT_OK'
+        '404':
+          $ref: '#/components/responses/MERCHANT_NOT_FOUND'
+    patch:
+      tags: [merchant]
+      summary: Edit the caller's own merchant profile.
+      security:
+        - bearerSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                business_name:
+                  type: string
+                  maxLength: 255
+                merchant_type:
+                  type: string
+                  maxLength: 50
+                location_id:
+                  type: integer
+                  minimum: 1
+      responses:
+        '200':
+          $ref: '#/components/responses/MERCHANT_OK'
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '403':
+          $ref: '#/components/responses/FORBIDDEN'
+        '404':
+          $ref: '#/components/responses/MERCHANT_OR_LOCATION_NOT_FOUND'
+  /products:
+    get:
+      tags: [catalog]
+      summary: List catalog products.
+      parameters:
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: per_page
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+        - name: category_id
+          in: query
+          schema: {type: integer, minimum: 1}
+        - name: status
+          in: query
+          schema: {type: string}
+        - name: q
+          in: query
+          schema: {type: string}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: integer}
+                        category_id: {type: integer}
+                        category_name_key: {type: [string, 'null']}
+                        category_name: {type: [string, 'null']}
+                        canonical_name: {type: string}
+                        attributes_json:
+                          type: object
+                        created_by: {type: integer}
+                        status: {type: string}
+                        variants:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              id: {type: integer}
+                              variant_key: {type: string}
+                              attributes_json:
+                                type: object
+                  meta:
+                    type: object
+                    properties:
+                      page: {type: integer}
+                      per_page: {type: integer}
+                      total: {type: integer}
+                      has_more: {type: boolean}
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+    post:
+      tags: [catalog]
+      summary: Create a catalog product definition.
+      security:
+        - bearerSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category_id, canonical_name, attributes_json]
+              properties:
+                category_id:
+                  type: integer
+                  minimum: 1
+                canonical_name:
+                  type: string
+                  maxLength: 255
+                attributes_json:
+                  type: object
+                variants:
+                  type: array
+                  items:
+                    type: object
+                    required: [variant_key, attributes_json]
+                    properties:
+                      variant_key:
+                        type: string
+                        maxLength: 191
+                      attributes_json:
+                        type: object
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: object
+                    properties:
+                      id: {type: integer}
+                      category_id: {type: integer}
+                      category_name_key: {type: [string, 'null']}
+                      category_name: {type: [string, 'null']}
+                      canonical_name: {type: string}
+                      attributes_json:
+                        type: object
+                      created_by: {type: integer}
+                      status: {type: string}
+                      variants:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id: {type: integer}
+                            variant_key: {type: string}
+                            attributes_json:
+                              type: object
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '404':
+          $ref: '#/components/responses/CATEGORY_NOT_FOUND'
+  /webhook/telegram:
+    post:
+      tags: [telegram]
+      summary: Telegram Bot webhook receiver — ack only this phase.
+      description: >
+        Validates X-Telegram-Bot-Api-Secret-Token (constant-time) against the
+        configured secret. Wrong/missing secret → 403 + audit. On success fires
+        the telegram.webhook event and acks; the update body is not parsed or
+        persisted (§B.12.3).
+      security: []
+      parameters:
+        - name: X-Telegram-Bot-Api-Secret-Token
+          in: header
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {}
+            examples:
+              minimal: {value: {update_id: 1, message: {}}}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data: {type: object, properties: {received: {type: boolean, const: true}}}
+        '403':
+          $ref: '#/components/responses/FORBIDDEN'
+  /listings:
+    get:
+      tags: [listings]
+      summary: List listings (active/public by default; merchant_id scope shows own).
+      parameters:
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: per_page
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+        - name: category_id
+          in: query
+          schema: {type: integer, minimum: 1}
+        - name: location_id
+          in: query
+          schema: {type: integer, minimum: 1}
+        - name: price_min
+          in: query
+          schema: {type: integer, minimum: 0}
+        - name: price_max
+          in: query
+          schema: {type: integer, minimum: 0}
+        - name: merchant_id
+          in: query
+          schema: {type: integer, minimum: 1, description: "Restricted to caller's own wp_user_id."}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Listing' }
+                  meta:
+                    type: object
+                    properties:
+                      page: {type: integer}
+                      per_page: {type: integer}
+                      total: {type: integer}
+                      has_more: {type: boolean}
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '403':
+          $ref: '#/components/responses/FORBIDDEN'
+    post:
+      tags: [listings]
+      summary: Create a listing (status=DRAFT).
+      security:
+        - bearerSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product_id, price, location_id]
+              properties:
+                product_id: {type: integer, minimum: 1}
+                variant_id: {type: integer, minimum: 1}
+                price: {type: integer, minimum: 1, description: "Minor currency units (§B.4)."}
+                currency: {type: string, pattern: '^[A-Z]{3}$', default: ETB}
+                location_id: {type: integer, minimum: 1}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data: { $ref: '#/components/schemas/Listing' }
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '403':
+          $ref: '#/components/responses/FORBIDDEN'
+  /listings/{id}:
+    get:
+      tags: [listings]
+      summary: Read a single listing (public for ACTIVE/PAUSED/OUT_OF_STOCK).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data: { $ref: '#/components/schemas/Listing' }
+        '404':
+          $ref: '#/components/responses/LISTING_NOT_FOUND'
+    patch:
+      tags: [listings]
+      summary: Update price / currency / location on a listing owned by the caller.
+      security:
+        - bearerSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                price: {type: integer, minimum: 1}
+                currency: {type: string, pattern: '^[A-Z]{3}$'}
+                location_id: {type: integer, minimum: 1}
+                version: {type: integer, minimum: 1, description: "Optimistic lock (§B.7.3)."}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data: { $ref: '#/components/schemas/Listing' }
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '403':
+          $ref: '#/components/responses/FORBIDDEN'
+        '404':
+          $ref: '#/components/responses/LISTING_NOT_FOUND'
+        '409':
+          $ref: '#/components/responses/CONFLICT_STALE_VERSION'
+  /listings/{id}/status:
+    post:
+      tags: [listings]
+      summary: Transition listing status (§B.6.1 state machine).
+      security:
+        - bearerSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, version]
+              properties:
+                to: {type: string, enum: [PENDING_REVIEW, ACTIVE, PAUSED, OUT_OF_STOCK, REJECTED, ARCHIVED]}
+                version: {type: integer, minimum: 1}
+                note: {type: string, description: "Required when to=REJECTED (admin)."}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: object
+                    properties:
+                      status: {type: string}
+                      version: {type: integer}
+                      published_at: {type: [string, 'null'], format: date-time}
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '403':
+          $ref: '#/components/responses/FORBIDDEN'
+        '404':
+          $ref: '#/components/responses/LISTING_NOT_FOUND'
+        '409':
+          $ref: '#/components/responses/STATUS_CONFLICTS'
+  /listings/{id}/images:
+    get:
+      tags: [listings]
+      summary: List images for a listing (public for ACTIVE/PAUSED/OUT_OF_STOCK).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        image_id: {type: integer}
+                        image_url: {type: string}
+                        thumb_url: {type: [string, 'null']}
+                        sort_order: {type: integer}
+        '404':
+          $ref: '#/components/responses/LISTING_NOT_FOUND'
+    post:
+      tags: [listings]
+      summary: Upload a listing image (server-assigned storage key, §B.4.4).
+      security:
+        - bearerSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: object
+                    properties:
+                      image_id: {type: integer}
+                      image_url: {type: string}
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '403':
+          $ref: '#/components/responses/FORBIDDEN'
+        '404':
+          $ref: '#/components/responses/LISTING_NOT_FOUND'
+        '422':
+          $ref: '#/components/responses/ENTITLEMENT_LIMIT_REACHED'
+  /listings/{id}/images/{image_id}:
+    delete:
+      tags: [listings]
+      summary: Delete a listing image (owner only).
+      security:
+        - bearerSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+        - name: image_id
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: object
+                    properties:
+                      deleted: {type: boolean, const: true}
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '403':
+          $ref: '#/components/responses/FORBIDDEN'
+        '404':
+          $ref: '#/components/responses/LISTING_IMAGE_NOT_FOUND'
+  /inventory/{listing_id}:
+    patch:
+      tags: [listings]
+      summary: Update stock/sku on a listing's inventory row (owner only; triggers system status transitions).
+      security:
+        - bearerSession: []
+      parameters:
+        - name: listing_id
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [stock, version]
+              properties:
+                stock: {type: integer, minimum: 0}
+                sku: {type: string, maxLength: 191}
+                version: {type: integer, minimum: 1, description: "Optimistic lock on tb_inventory.version (§B.7.3)."}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: object
+                    properties:
+                      stock: {type: integer}
+                      sku: {type: string}
+                      version: {type: integer}
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '403':
+          $ref: '#/components/responses/FORBIDDEN'
+        '404':
+          $ref: '#/components/responses/LISTING_NOT_FOUND'
+        '409':
+          $ref: '#/components/responses/CONFLICT_STALE_VERSION'
+  /availability/{listing_id}:
+    patch:
+      tags: [listings]
+      summary: Update availability_state/note for a service-type listing (owner only).
+      security:
+        - bearerSession: []
+      parameters:
+        - name: listing_id
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [availability_state]
+              properties:
+                availability_state: {type: string, enum: [AVAILABLE_TODAY, AVAILABLE_THIS_WEEK, BOOKED, UNAVAILABLE]}
+                note: {type: string}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: object
+                    properties:
+                      availability_state: {type: string}
+                      note: {type: string}
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '403':
+          $ref: '#/components/responses/FORBIDDEN'
+        '404':
+          $ref: '#/components/responses/LISTING_NOT_FOUND'
+  /search:
+    get:
+      tags: [search]
+      summary: Search listings with deterministic ranking (§B.11.3).
+      security: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: {type: string, minLength: 1}
+        - name: category_id
+          in: query
+          schema: {type: integer, minimum: 1}
+        - name: location_id
+          in: query
+          schema: {type: integer, minimum: 1}
+        - name: price_min
+          in: query
+          schema: {type: integer, minimum: 0}
+        - name: price_max
+          in: query
+          schema: {type: integer, minimum: 0}
+        - name: merchant_id
+          in: query
+          schema: {type: integer, minimum: 1, description: "Scoped to a merchant; shows their listings in any status."}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: per_page
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: Paginated search results ranked by §B.11.3.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Listing'
+                  meta:
+                    type: object
+                    properties:
+                      page: {type: integer}
+                      per_page: {type: integer}
+                      total: {type: integer}
+                      has_more: {type: boolean}
+                      suggestions:
+                        type: array
+                        description: Relaxed-filter hints returned when total=0 (§B.11.4).
+                        items:
+                          type: object
+                          properties:
+                            type: {type: string, enum: [relaxed]}
+                            hint: {type: string}
+                            filters: {type: object}
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+  /orders:
+    get:
+      tags: [orders]
+      summary: List the caller's orders (customer or merchant), newest first.
+      description: Visibility is caller-scoped — a customer sees orders they placed, a merchant sees orders against their listings, an admin sees all.
+      responses:
+        '200':
+          description: The caller's orders.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+    post:
+      tags: [orders]
+      summary: Create a REQUESTED order against a live listing (§B.6.2).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [listing_id]
+              properties:
+                listing_id: {type: integer, minimum: 1}
+                qty: {type: integer, minimum: 1, maximum: 99, default: 1}
+      responses:
+        '200':
+          description: Order created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: object
+                    properties:
+                      order_id: {type: integer}
+                      status: {type: string, const: REQUESTED}
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '409':
+          description: ORDER_ALREADY_OPEN or LISTING_NOT_AVAILABLE.
+  /orders/{id}:
+    get:
+      tags: [orders]
+      summary: Read one order (customer/merchant/admin only).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: The order.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '404':
+          description: ORDER_NOT_FOUND (also hides orders the caller cannot see).
+  /orders/{id}/transition:
+    post:
+      tags: [orders]
+      summary: Advance the order state machine (§B.6.2). COMPLETED needs both sides to confirm (§B.6.3).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              properties:
+                to:
+                  type: string
+                  enum: [ACCEPTED, COMPLETED, CANCELLED, EXPIRED, DISPUTED]
+                reason:
+                  type: string
+                  description: Required for CANCELLED and DISPUTED.
+      responses:
+        '200':
+          description: Transition result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: object
+                    properties:
+                      order_id: {type: integer}
+                      status: {type: string}
+                      completed: {type: boolean}
+                      from: {type: string}
+                    required: [order_id, status]
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '409':
+          description: ORDER_INVALID_TRANSITION or INVENTORY_INSUFFICIENT_STOCK.
+        '404':
+          description: ORDER_NOT_FOUND.
+  /orders/{id}/review:
+    get:
+      tags: [orders]
+      summary: Read the review for an order (null if none yet).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: The review, or null.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    oneOf:
+                      - $ref: '#/components/schemas/Review'
+                      - {type: 'null'}
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '404':
+          description: ORDER_NOT_FOUND.
+    post:
+      tags: [orders]
+      summary: Write the review for a COMPLETED order (§B.6.4), once, within 30 days, by the customer.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rating]
+              properties:
+                rating: {type: integer, minimum: 1, maximum: 5}
+                comment: {type: string, maxLength: 1000}
+      responses:
+        '200':
+          description: Review created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: object
+                    properties:
+                      review_id: {type: integer}
+                      order_id: {type: integer}
+                      rating: {type: integer}
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '403':
+          description: FORBIDDEN_NOT_OWNER (caller is not the order's customer).
+        '404':
+          description: ORDER_NOT_FOUND.
+        '422':
+          description: REVIEW_NOT_ELIGIBLE (not completed / window closed / already reviewed).
+  /requests:
+    get:
+      tags: [requests]
+      summary: List the caller's requests, newest first.
+      responses:
+        '200':
+          description: The caller's requests.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: array
+                    items: {$ref: '#/components/schemas/Request'}
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+    post:
+      tags: [requests]
+      summary: Create an OPEN customer request (§B.6.6), defaulting expires_at to 14 days.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category_id, location_id]
+              properties:
+                category_id: {type: integer}
+                location_id: {type: integer}
+                budget_max: {type: integer, minimum: 0}
+                urgency: {type: string, enum: [low, normal, high, urgent], default: normal}
+                attributes: {type: object, additionalProperties: true}
+      responses:
+        '200':
+          description: Request created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: object
+                    properties:
+                      request_id: {type: integer}
+                      status: {type: string, const: OPEN}
+        '404':
+          description: CATEGORY_NOT_FOUND / LOCATION_NOT_FOUND.
+  /requests/{id}:
+    get:
+      tags: [requests]
+      summary: Read one request (owner or admin).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: The request.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data: {$ref: '#/components/schemas/Request'}
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '404':
+          description: REQUEST_NOT_FOUND.
+  /requests/{id}/transition:
+    post:
+      tags: [requests]
+      summary: Apply a legal transition (§B.6.6) — cancel or fulfill.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              properties:
+                to: {type: string, enum: [CANCELLED, FULFILLED]}
+                order_id: {type: integer, description: Required when to=FULFILLED (a COMPLETED order of the caller against a matched listing).}
+      responses:
+        '200':
+          description: Transition applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: object
+                    properties:
+                      request_id: {type: integer}
+                      status: {type: string}
+                      from: {type: string}
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '409':
+          description: REQUEST_INVALID_TRANSITION (illegal edge, actor, or order not completed).
+  /requests/{id}/matches:
+    get:
+      tags: [requests]
+      summary: Rule-based merchant matches (§B.11.5), ranked. Runs matching on first read.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: The matched merchants (≤10), by score desc.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: object
+                    properties:
+                      status: {type: string}
+                      matches:
+                        type: array
+                        items: {$ref: '#/components/schemas/RequestMatch'}
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '404':
+          description: REQUEST_NOT_FOUND.
+  /reports:
+    post:
+      tags: [trust_safety]
+      summary: Submit a new report (§B.6.7).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [entity_type, entity_id, reason]
+              properties:
+                entity_type: {type: string, enum: [merchant, listing, order, request]}
+                entity_id: {type: integer}
+                reason: {type: string}
+      responses:
+        '200':
+          description: Report submitted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: object
+                    properties:
+                      report_id: {type: integer}
+                      status: {type: string, const: pending}
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+    get:
+      tags: [trust_safety]
+      summary: List reports, filterable by status and entity.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: {type: string, enum: [pending, cleared, rejected, flagged]}
+        - name: entity_type
+          in: query
+          required: false
+          schema: {type: string, enum: [merchant, listing, order, request]}
+        - name: entity_id
+          in: query
+          required: false
+          schema: {type: integer}
+      responses:
+        '200':
+          description: Paginated list of reports.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: array
+                    items: {$ref: '#/components/schemas/Report'}
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+    get:
+      tags: [trust_safety]
+      summary: Read one report.
+      parameters:
+        - name: report_id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: The report.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data: {$ref: '#/components/schemas/Report'}
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '404':
+          description: REPORT_NOT_FOUND.
+  /reports/{report_id}:
+    post:
+      tags: [trust_safety]
+      summary: Resolve or dismiss a report.
+      parameters:
+        - name: report_id
+          in: path
+          required: true
+          schema: {type: integer}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [outcome, reason]
+              properties:
+                outcome: {type: string, enum: [cleared, rejected, flagged]}
+                reason: {type: string}
+      responses:
+        '200':
+          description: Report transition applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: object
+                    properties:
+                      report_id: {type: integer}
+                      status: {type: string}
+                      from: {type: string}
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '404':
+          description: REPORT_NOT_FOUND.
+  /ai:
+    post:
+      tags: [ai]
+      summary: Interpret a task using the AI gateway (§B.2.1).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                task:
+                  type: string
+                  description: The AI task name (e.g. "summarize", "classify", "extract").
+                input:
+                  type: object
+                  description: Task-specific input payload.
+      responses:
+        '200':
+          description: AI interpretation result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean, const: true}
+                  data:
+                    type: object
+                    properties:
+                      task: {type: string}
+                      input: {type: object}
+                      fallback: {type: boolean}
+                      status: {type: string}
+                      message: {type: string}
+                      available: {type: boolean}
+        '400':
+          $ref: '#/components/responses/VALIDATION_FAILED'
+        '401':
+          $ref: '#/components/responses/AUTH_ERRORS'
+        '422':
+          description: AI_BUDGET_EXHAUSTED (cost ceiling reached).
+components:
+  securitySchemes:
+    bearerSession:
+      type: http
+      scheme: bearer
+      description: Session token from POST /auth/session (SHA-256 hashed server-side; 24 h absolute, 2 h idle).
+  responses:
+    VALIDATION_FAILED:
+      description: Request failed validation.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: {type: object, properties: {code: {type: string, const: VALIDATION_FAILED}}}
+    AUTH_ERRORS:
+      description: One of AUTH_INVALID_SIGNATURE / AUTH_EXPIRED_INITDATA / AUTH_REPLAY_DETECTED / AUTH_SESSION_EXPIRED (all 401).
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: {type: object, properties: {code: {type: string, enum: [AUTH_INVALID_SIGNATURE, AUTH_EXPIRED_INITDATA, AUTH_REPLAY_DETECTED, AUTH_SESSION_EXPIRED]}}}
+    FORBIDDEN:
+      description: FORBIDDEN_CAPABILITY (403).
+    RATE_LIMITED:
+      description: Too many auth attempts. Includes Retry-After header.
+      headers:
+        Retry-After: {description: Seconds until the window resets.}
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: {type: object, properties: {code: {type: string, const: RATE_LIMITED}}}
+    MERCHANT_OK:
+      description: Merchant profile read/write result.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              success: {type: boolean, const: true}
+              data:
+                type: object
+                properties:
+                  id: {type: integer}
+                  business_name: {type: string}
+                  merchant_type: {type: string}
+                  location_id: {type: [integer, 'null']}
+                  verification_status: {type: string}
+                  verified_at: {type: [string, 'null'], format: date-time}
+                  suspended_at: {type: [string, 'null'], format: date-time}
+    ME_OK:
+      description: /me read result.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              success: {type: boolean, const: true}
+              data:
+                type: object
+                properties:
+                  language: {type: string}
+                  display_name: {type: string}
+                  location_id: {type: [integer, 'null']}
+    LOCATION_NOT_FOUND:
+      description: Catalog location does not exist.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: {type: object, properties: {code: {type: string, const: LOCATION_NOT_FOUND}}}
+    MERCHANT_NOT_FOUND:
+      description: Merchant profile does not exist.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: {type: object, properties: {code: {type: string, const: MERCHANT_NOT_FOUND}}}
+    MERCHANT_OR_LOCATION_NOT_FOUND:
+      description: Merchant profile or catalog location does not exist.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    enum: [MERCHANT_NOT_FOUND, LOCATION_NOT_FOUND]
+
+    CATEGORY_NOT_FOUND:
+      description: Catalog category does not exist.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: {type: object, properties: {code: {type: string, const: CATEGORY_NOT_FOUND}}}
+    LISTING_NOT_FOUND:
+      description: Listing does not exist.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: {type: object, properties: {code: {type: string, const: LISTING_NOT_FOUND}}}
+    LISTING_IMAGE_NOT_FOUND:
+      description: Listing image does not exist.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: {type: object, properties: {code: {type: string, const: LISTING_IMAGE_NOT_FOUND}}}
+    LISTING_NOT_AVAILABLE:
+      description: This listing is not available for ordering.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: {type: object, properties: {code: {type: string, const: LISTING_NOT_AVAILABLE}}}
+    LISTING_INVALID_TRANSITION:
+      description: This status change is not allowed.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: {type: object, properties: {code: {type: string, const: LISTING_INVALID_TRANSITION}}}
+    INVENTORY_INSUFFICIENT_STOCK:
+      description: Not enough stock available.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: {type: object, properties: {code: {type: string, const: INVENTORY_INSUFFICIENT_STOCK}}}
+    CONFLICT_STALE_VERSION:
+      description: The item changed since it was loaded (stale version). Retry after reloading.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: {type: object, properties: {code: {type: string, const: CONFLICT_STALE_VERSION}}}
+    ENTITLEMENT_LIMIT_REACHED:
+      description: The merchant entitlement limit was reached.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: {type: object, properties: {code: {type: string, const: ENTITLEMENT_LIMIT_REACHED}}}
+    STATUS_CONFLICTS:
+      description: One of CONFLICT_STALE_VERSION, LISTING_INVALID_TRANSITION, MERCHANT_NOT_VERIFIED, ENTITLEMENT_LIMIT_REACHED.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    enum: [CONFLICT_STALE_VERSION, LISTING_INVALID_TRANSITION, MERCHANT_NOT_VERIFIED, ENTITLEMENT_LIMIT_REACHED]
+    Listing:
+      description: A merchant listing (§B.4, §B.6.1).
+      type: object
+      properties:
+        id: {type: integer}
+        merchant_id: {type: integer}
+        product_id: {type: integer}
+        variant_id: {type: [integer, 'null']}
+        category_id: {type: integer}
+        price: {type: integer, description: "Minor currency units."}
+        currency: {type: string}
+        location_id: {type: integer}
+        status: {type: string, enum: [DRAFT, PENDING_REVIEW, ACTIVE, PAUSED, OUT_OF_STOCK, REJECTED, ARCHIVED]}
+        published_at: {type: [string, 'null'], format: date-time}
+        version: {type: integer}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        product:
+          type: object
+          properties:
+            canonical_name: {type: string}
+            category_name_key: {type: [string, 'null']}
+            category_name: {type: [string, 'null']}
+            attributes_json: {type: object}
+        variant:
+          type: object
+          properties:
+            variant_key: {type: string}
+            attributes_json: {type: object}
+        merchant:
+          type: object
+          properties:
+            id: {type: integer}
+            business_name: {type: string}
+            merchant_type: {type: string}
+            location_id: {type: [integer, 'null']}
+            verification_status: {type: string}
+        inventory:
+          type: object
+          properties:
+            stock: {type: integer}
+            sku: {type: string}
+            version: {type: integer}
+        availability:
+          type: object
+          properties:
+            availability_state: {type: string}
+            note: {type: string}
+        cover_image:
+          type: object
+          properties:
+            image_id: {type: integer}
+            thumb_url: {type: [string, 'null']}
+    Order:
+      type: object
+      properties:
+        order_id: {type: integer}
+        customer_id: {type: integer}
+        merchant_id: {type: integer}
+        listing_id: {type: integer}
+        price: {type: integer}
+        currency: {type: string}
+        qty: {type: integer}
+        status: {type: string, enum: [REQUESTED, ACCEPTED, COMPLETED, CANCELLED, EXPIRED, DISPUTED]}
+        completed: {type: boolean}
+        created_at: {type: [string, 'null']}
+        updated_at: {type: [string, 'null']}
+    Review:
+      type: object
+      properties:
+        review_id: {type: integer}
+        order_id: {type: integer}
+        merchant_id: {type: integer}
+        listing_id: {type: integer}
+        rating: {type: integer, minimum: 1, maximum: 5}
+        comment: {type: string}
+        created_at: {type: [string, 'null']}
+    Request:
+      type: object
+      properties:
+        request_id: {type: integer}
+        customer_id: {type: integer}
+        category_id: {type: integer}
+        attributes: {type: object, additionalProperties: true}
+        budget_max: {type: integer}
+        location_id: {type: integer}
+        urgency: {type: string, enum: [low, normal, high, urgent]}
+        status: {type: string, enum: [OPEN, MATCHED, FULFILLED, CANCELLED, EXPIRED]}
+        fulfilled_order_id: {type: [integer, 'null']}
+        expires_at: {type: [string, 'null']}
+        created_at: {type: [string, 'null']}
+        updated_at: {type: [string, 'null']}
+    RequestMatch:
+      type: object
+      properties:
+        merchant_id: {type: integer}
+        listing_id: {type: integer}
+        score: {type: number}
+        notified_at: {type: [string, 'null']}
+    Report:
+      type: object
+      properties:
+        report_id: {type: integer}
+        reporter_id: {type: integer}
+        entity_type: {type: string, enum: [merchant, listing, order, request]}
+        entity_id: {type: integer}
+        reason: {type: string}
+    AI:
+      type: object
+      properties:
+        task: {type: string}
+        input: {type: object}
+        fallback: {type: boolean}
+        status: {type: string}
+        message: {type: string}
+        available: {type: boolean}
+    RequestMatch:
+      type: object
+      properties:
+        merchant_id: {type: integer}
+        listing_id: {type: integer}
+        score: {type: number}
+        notified_at: {type: [string, 'null']}
+        status: {type: string, enum: [pending, cleared, rejected, flagged]}
+        resolved_by: {type: [integer, 'null']}
+        resolved_at: {type: [string, 'null']}
+        resolved_reason: {type: string}
+        created_at: {type: [string, 'null']}
+        updated_at: {type: [string, 'null']}
+    Document:
+      type: object
+      properties:
+        document_id: {type: integer}
+        merchant_id: {type: integer}
+        document_type: {type: string}
+        storage_key: {type: string}
+        status: {type: string, enum: [pending, verified, revoked]}
+        verified_at: {type: [string, 'null']}
+        revoked_at: {type: [string, 'null']}
+        revocation_reason: {type: string}
+        created_at: {type: [string, 'null']}
+        updated_at: {type: [string, 'null']}

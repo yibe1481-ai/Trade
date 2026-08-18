@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Smart Trade</title>
+<style>
+  :root { --bg:#ffffff; --fg:#222222; --accent:#2e6ff2; --muted:#707579; --card:#f4f4f5; }
+  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+         background:var(--bg); color:var(--fg); padding:16px; }
+  .card { background:var(--card); border-radius:12px; padding:14px 16px; margin:10px 0; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .muted { color:var(--muted); font-size:13px; }
+  .row { display:flex; align-items:center; gap:10px; }
+  .avatar { width:44px; height:44px; border-radius:50%; background:var(--accent); color:#fff;
+            display:flex; align-items:center; justify-content:center; font-weight:600; }
+  button { width:100%; padding:13px; border:0; border-radius:10px; background:var(--accent);
+           color:#fff; font-size:15px; font-weight:600; margin-top:10px; }
+  code { word-break:break-all; font-size:11px; background:var(--card); padding:8px; border-radius:8px; display:block; }
+  .ok { color:#2e7d32; } .err { color:#c62828; }
+  .hide { display:none; }
+</style>
+</head>
+<body>
+  <div class="row"><div class="avatar" id="avatar">?</div>
+    <div><h1 id="name">Smart Trade</h1><div class="muted" id="sub">Telegram Mini App</div></div>
+  </div>
+
+  <div class="card" id="signinCard">
+    <div class="muted" id="status">Signing in…</div>
+    <div id="errBox" class="hide err"></div>
+  </div>
+
+  <div class="card hide" id="sessionCard">
+    <b>Session token</b><div class="muted">Use it as the Bearer for the REST API.</div>
+    <code id="token"></code>
+  </div>
+
+  <div class="card hide" id="profileCard">
+    <div id="profileText" class="muted"></div>
+  </div>
+
+  <button class="hide" id="copyBtn">Copy token</button>
+
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+(function () {
+  var tg = window.Telegram && window.Telegram.WebApp;
+  var REST = location.origin + '/wp-json/trade/v1/';
+  var token = null;
+
+  function $(id) { return document.getElementById(id); }
+  function show(id) { $(id).classList.remove('hide'); }
+  function setStatus(t, ok) { var el = $('status'); el.textContent = t; el.className = ok ? 'ok' : 'muted'; }
+  function err(msg) { $('errBox').textContent = msg; show('errBox'); }
+
+  if (tg) {
+    tg.ready(); tg.expand();
+    document.documentElement.style.setProperty('--bg', tg.themeParams.bg_color || '#ffffff');
+    document.documentElement.style.setProperty('--fg', tg.themeParams.text_color || '#222222');
+    document.documentElement.style.setProperty('--accent', tg.themeParams.button_color || '#2e6ff2');
+    document.documentElement.style.setProperty('--muted', tg.themeParams.hint_color || '#707579');
+    document.documentElement.style.setProperty('--card', tg.themeParams.secondary_bg_color || '#f4f4f5');
+  } else {
+    setStatus('Opened outside Telegram — login needs the bot.', false);
+    return;
+  }
+
+  var user = tg.initDataUnsafe && tg.initDataUnsafe.user;
+  if (user && user.first_name) {
+    $('name').textContent = user.first_name + (user.last_name ? ' ' + user.last_name : '');
+    $('avatar').textContent = (user.first_name || '?').charAt(0);
+    $('sub').textContent = '@' + (user.username || 'tg ' + user.id) + ' · ' + (user.language_code || 'en');
+  }
+
+  async function login() {
+    setStatus('Signing in…', false);
+    try {
+      var res = await fetch(REST + 'auth/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ init_data: tg.initData })
+      });
+      var j = await res.json();
+      if (!j.success) { err((j.error && j.error.message) || 'Login failed'); setStatus('Sign-in failed', false); return; }
+      token = j.data.session_token;
+      setStatus('Signed in ✔', true);
+      $('token').textContent = token;
+      show('sessionCard'); show('copyBtn');
+      await loadProfile();
+    } catch (e) { err(String(e)); setStatus('Network error', false); }
+  }
+
+  async function loadProfile() {
+    try {
+      var me = await fetch(REST + 'me', { headers: { Authorization: 'Bearer ' + token } }).then(function (r) { return r.json(); });
+      var on = await fetch(REST + 'mini_app/onboard', { headers: { Authorization: 'Bearer ' + token } }).then(function (r) { return r.json(); });
+      var bits = [];
+      if (me.data) { bits.push('Role: ' + (me.data.role || 'customer')); if (me.data.language) bits.push('Lang: ' + me.data.language); }
+      if (on.data) { bits.push('Onboard: ' + on.data.onboarding_state); }
+      $('profileText').textContent = bits.length ? bits.join(' · ') : 'Profile loaded.';
+      show('profileCard');
+    } catch (e) { $('profileText').textContent = 'Profile unavailable: ' + e; show('profileCard'); }
+  }
+
+  $('copyBtn').addEventListener('click', function () {
+    if (navigator.clipboard) { navigator.clipboard.writeText(token); }
+    if (tg) { tg.showPopup({ message: 'Token copied' }); }
+  });
+
+  login();
+})();
+</script>
+</body>
+</html>
