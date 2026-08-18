@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Trade Bot
  * Description: AI-assisted local commerce platform for Telegram (WordPress backend). Phase 0 — Foundation.
- * Version:     0.1.0
+ * Version:     0.1.1
  * Requires PHP: 8.2
  * Author:      Trade Bot
  * Text Domain: trade
@@ -48,8 +48,8 @@ add_action( 'rest_api_init', array( NotificationsService::class, 'routes' ) );
 add_action( 'rest_api_init', array( AIService::class, 'routes' ) );
 add_action( 'rest_api_init', array( MiniAppService::class, 'routes' ) );
 
-// §B.6.5: when verification is revoked (verification module emits this event), pause all ACTIVE listings.
+// Verification revocation pauses active listings.
 add_action( 'trade.MERCHANT_VERIFICATION_REVOKED', array( ListingsService::class, 'pause_on_revocation' ) );
 
-// §B.3.4: identity grants tb_session to any logged-in user; service-layer checks still apply.
+// Identity grants tb_session to authenticated Trade users; service-layer checks still apply.
 add_filter( 'user_has_cap', array( Sessions::class, 'grant_trade_caps' ), 10, 3 );

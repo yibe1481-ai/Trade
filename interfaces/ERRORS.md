@@ -1,14 +1,11 @@
 # Trade Bot — Global Error Taxonomy
 
-**Version:** 1.3 (MVP)
+**Version:** 1.4 (MVP)
 **Spec reference:** Master Specification v1.5 · §B.10
-**Rule:** Codes are stable identifiers. Never rename. Add new codes in the same task that introduces them, in this file. User-facing text comes from `tb_translations` keyed by `code` — never from the `message` field.
 
----
+Codes are stable identifiers. Never rename them. User-facing text is resolved from `tb_translations`; the error `message` is safe developer-facing text.
 
 ## Envelope
-
-All failures return:
 
 ```json
 {
@@ -24,99 +21,107 @@ All failures return:
 }
 ```
 
-`message` is for logs/developers. `context` should contain enough structured detail (IDs, field names, limits) that an agent can diagnose the failure from the log line alone — see §B.10.4 "zero-scan debugging." If you find yourself wanting to open source code to understand why a code fired, `context` is under-populated; fix that instead.
-
-`retryable: true` only for codes mapped to HTTP 429 or 503.
-
----
+`retryable` is true only for transient 429/503 failures. Context must contain safe diagnostic information; never include credentials, tokens, identity documents, or other sensitive data.
 
 ## Registry
 
-### Cross-cutting (`core`)
+### core
 
 | Code | HTTP | Retryable | Meaning |
-|---|---|---|---|
-| `VALIDATION_FAILED` | 400 | false | Request body/params failed validation. `context.fields[]` lists offending fields. |
-| `FORBIDDEN_CAPABILITY` | 403 | false | Session lacks the capability the endpoint requires. |
-| `FORBIDDEN_NOT_OWNER` | 403 | false | Caller authenticated but does not own the resource (`ownership_rule` failed). |
-| `RATE_LIMITED` | 429 | true | A limit in §B.3.5 was exceeded. `Retry-After` header set. |
-| `IDEMPOTENCY_KEY_REUSED` | 422 | false | `Idempotency-Key` reused with a different request body/hash. |
-| `REQUEST_IN_PROGRESS` | 409 | true | Same `Idempotency-Key` is currently being processed elsewhere. |
-| `CONFLICT_STALE_VERSION` | 409 | false | Optimistic-lock `version` on a `PATCH` didn't match current row (§B.7.3). Applies to any module using version-guarded writes, not only `listings`. |
-| `JOB_LEASE_LOST` | 409 | false | Worker's `lock_token` didn't match on complete — lease expired or was reclaimed (§B.9.2). |
-| `INTERNAL_ERROR` | 500 | false | Unhandled server error. |
+|---|---:|:---:|---|
+| `VALIDATION_FAILED` | 400 | false | Request validation failed. `context.fields[]` identifies fields. |
+| `FORBIDDEN_CAPABILITY` | 403 | false | Session lacks the required capability. |
+| `FORBIDDEN_NOT_OWNER` | 403 | false | Caller does not own the resource. |
+| `RATE_LIMITED` | 429 | true | A configured rate limit was exceeded. |
+| `IDEMPOTENCY_KEY_REUSED` | 422 | false | Same idempotency key was used for a different request. |
+| `REQUEST_IN_PROGRESS` | 409 | true | Same idempotent operation is currently being processed. |
+| `CONFLICT_STALE_VERSION` | 409 | false | Optimistic-lock version is stale. |
+| `JOB_LEASE_LOST` | 409 | false | Worker lease was lost or reclaimed. |
+| `INTERNAL_ERROR` | 500 | false | Unexpected server error. |
 
-### `identity`
-
-| Code | HTTP | Retryable | Meaning |
-|---|---|---|---|
-| `AUTH_INVALID_SIGNATURE` | 401 | false | `initData` HMAC did not verify against the bot secret. |
-| `AUTH_EXPIRED_INITDATA` | 401 | false | `auth_date` older than the 300s window (§B.3.1). |
-| `AUTH_REPLAY_DETECTED` | 401 | false | This signed payload's hash was already used within the replay window. |
-| `AUTH_SESSION_EXPIRED` | 401 | false | Session token past its absolute (24h) or idle (2h) TTL. |
-
-### `merchant`
+### identity
 
 | Code | HTTP | Retryable | Meaning |
-|---|---|---|---|
-| `MERCHANT_NOT_FOUND` | 404 | false | Merchant doesn't exist or isn't visible to this caller. |
-| `MERCHANT_NOT_VERIFIED` | 403 | false | Action requires `verification_status == verified`. |
+|---|---:|:---:|---|
+| `AUTH_INVALID_SIGNATURE` | 401 | false | Telegram initData signature failed. |
+| `AUTH_EXPIRED_INITDATA` | 401 | false | Telegram initData is outside the allowed age window. |
+| `AUTH_REPLAY_DETECTED` | 401 | false | Signed initData was reused. |
+| `AUTH_SESSION_EXPIRED` | 401 | false | Trade Bot session expired or was revoked. |
 
-### `catalog`
-
-| Code | HTTP | Retryable | Meaning |
-|---|---|---|---|
-| `LOCATION_NOT_FOUND` | 404 | false | Location does not exist or is not visible to this caller. |
-| `CATEGORY_NOT_FOUND` | 404 | false | Category does not exist or is not visible to this caller. |
-
-### `listings`
+### merchant
 
 | Code | HTTP | Retryable | Meaning |
-|---|---|---|---|
-| `LISTING_NOT_FOUND` | 404 | false | Listing doesn't exist or isn't visible to this caller. |
-| `LISTING_IMAGE_NOT_FOUND` | 404 | false | Listing image doesn't exist or isn't on this listing. |
-| `LISTING_INVALID_TRANSITION` | 409 | false | Requested status change isn't legal from the current state (§B.6.1). |
-| `LISTING_NOT_AVAILABLE` | 409 | false | Listing exists but isn't `ACTIVE` — used at contact/order time. |
-| `INVENTORY_INSUFFICIENT_STOCK` | 409 | false | Atomic conditional stock decrement affected 0 rows (§B.7.2). |
+|---|---:|:---:|---|
+| `MERCHANT_NOT_FOUND` | 404 | false | Merchant does not exist or is not visible. |
+| `MERCHANT_NOT_VERIFIED` | 403 | false | Operation requires a verified merchant. |
 
-### `orders`
+### verification
 
 | Code | HTTP | Retryable | Meaning |
-|---|---|---|---|
-| `ORDER_NOT_FOUND` | 404 | false | Order doesn't exist or isn't visible to this caller. |
-| `ORDER_INVALID_TRANSITION` | 409 | false | Requested status change isn't legal from the current state (§B.6.2). |
-| `ORDER_ALREADY_OPEN` | 409 | false | An open `REQUESTED` order already exists for this (customer, listing) pair. |
-| `REVIEW_NOT_ELIGIBLE` | 422 | false | Order isn't `COMPLETED`, the 30-day review window has closed, or the caller isn't the order's customer. |
+|---|---:|:---:|---|
+| `VERIFICATION_INVALID_TRANSITION` | 409 | false | Requested verification status transition is not legal. |
+| `VERIFICATION_ADMIN_REQUIRED` | 403 | false | Only an authorized administrator may review/revoke verification. |
 
-### `billing`
+### catalog
 
 | Code | HTTP | Retryable | Meaning |
-|---|---|---|---|
-| `ENTITLEMENT_LIMIT_REACHED` | 422 | false | Merchant's plan limit (e.g. `active_listings`) exceeded. |
+|---|---:|:---:|---|
+| `LOCATION_NOT_FOUND` | 404 | false | Location does not exist or is not visible. |
+| `CATEGORY_NOT_FOUND` | 404 | false | Category does not exist or is not visible. |
 
-### `ai`
-
-| Code | HTTP | Retryable | Meaning |
-|---|---|---|---|
-| `AI_BUDGET_EXHAUSTED` | 429 | true | Cost ceiling reached (§B.2.2); caller should use/expect the deterministic fallback. Also emitted as an event — see `EVENTS.md`. |
-| `AI_PROVIDER_UNAVAILABLE` | 503 | true | Upstream AI provider unreachable or erroring. |
-
-### `telegram`
+### listings
 
 | Code | HTTP | Retryable | Meaning |
-|---|---|---|---|
-| `TELEGRAM_UNAVAILABLE` | 503 | true | Telegram Bot API unreachable or erroring. |
+|---|---:|:---:|---|
+| `LISTING_NOT_FOUND` | 404 | false | Listing does not exist or is not visible. |
+| `LISTING_IMAGE_NOT_FOUND` | 404 | false | Listing image does not exist on the listing. |
+| `LISTING_INVALID_TRANSITION` | 409 | false | Listing state transition is illegal. |
+| `LISTING_NOT_AVAILABLE` | 409 | false | Listing is not currently active/available. |
+| `INVENTORY_INSUFFICIENT_STOCK` | 409 | false | Atomic stock decrement could not be completed. |
 
----
+### orders
 
-## Naming convention for codes not yet needed
+| Code | HTTP | Retryable | Meaning |
+|---|---:|:---:|---|
+| `ORDER_NOT_FOUND` | 404 | false | Order does not exist or is not visible. |
+| `ORDER_INVALID_TRANSITION` | 409 | false | Order state transition is illegal. |
+| `ORDER_ALREADY_OPEN` | 409 | false | An open order already exists for the customer/listing pair. |
+| `REVIEW_NOT_ELIGIBLE` | 422 | false | Review conditions are not satisfied. |
 
-New modules (`verification`, `requests`, `trust_safety`, `ai`, `billing`, …) need their own codes as they're built. Follow the existing pattern instead of inventing a new shape:
+### requests
 
+| Code | HTTP | Retryable | Meaning |
+|---|---:|:---:|---|
+| `REQUEST_NOT_FOUND` | 404 | false | Customer request does not exist or is not visible. |
+| `REQUEST_INVALID_TRANSITION` | 409 | false | Request state transition is illegal. |
+
+### billing
+
+| Code | HTTP | Retryable | Meaning |
+|---|---:|:---:|---|
+| `ENTITLEMENT_LIMIT_REACHED` | 422 | false | Merchant entitlement limit was reached. |
+
+### ai
+
+| Code | HTTP | Retryable | Meaning |
+|---|---:|:---:|---|
+| `AI_BUDGET_EXHAUSTED` | 429 | true | AI cost ceiling reached; deterministic fallback must be used. |
+| `AI_PROVIDER_UNAVAILABLE` | 503 | true | AI provider is temporarily unavailable. |
+
+### telegram
+
+| Code | HTTP | Retryable | Meaning |
+|---|---:|:---:|---|
+| `TELEGRAM_UNAVAILABLE` | 503 | true | Telegram Bot API is temporarily unavailable. |
+
+## Rules for new codes
+
+New codes must be added to this registry and the runtime mapping in `src/Core/Error.php` in the same change. Use stable names such as:
+
+```text
+<RESOURCE>_NOT_FOUND
+<RESOURCE>_INVALID_TRANSITION
+<RESOURCE>_NOT_ELIGIBLE
 ```
-<RESOURCE>_NOT_FOUND            → 404   (e.g. VERIFICATION_NOT_FOUND, REQUEST_NOT_FOUND)
-<RESOURCE>_INVALID_TRANSITION   → 409   (state-machine violations)
-<RESOURCE>_NOT_ELIGIBLE         → 422   (business-rule refusal, not a state-machine violation)
-```
 
-Add the row to this file in the same task that introduces the code (§B.10.3). Do not front-load codes for modules that don't exist yet.
+Never expose raw exceptions or provider-specific errors to clients.

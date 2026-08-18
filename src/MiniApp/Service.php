@@ -8,15 +8,8 @@ use Trade\Core\Store;
 use Trade\Identity\Service as Identity;
 use WP_REST_Request;
 
-/**
- * Telegram Mini App backend (§B.3 Mini App, interfaces/mini_app.md).
- *
- * The Mini App (trade/mini-app/index.html) logs in via POST /auth/session with Telegram
- * initData, then drives the rest of the marketplace REST API with the Bearer session token.
- * These two thin routes satisfy the mini_app contract without duplicating identity logic.
- */
+/** Contextual Telegram Mini App backend. */
 final class Service {
-
 	public const URL = 'mini_app_url';
 
 	public static function routes(): void {
@@ -24,25 +17,43 @@ final class Service {
 		Rest::register( 'mini_app/onboard', 'GET', 'tb_session', array( self::class, 'onboard' ) );
 	}
 
-	/** POST /mini_app/session — {init_data} → validated + session token (delegates to identity). */
 	public static function session( WP_REST_Request $request ): array {
-		$auth = Identity::login( $request ); // same payload {init_data}; verifies + issues session.
-		return array( 'data' => array_merge( array( 'validated' => true ), $auth['data'] ) );
+		return Identity::login( $request );
 	}
 
-	/** GET /mini_app/onboard?step= — contextual open state for the authenticated Telegram user. */
+	/** Return the exact launch context collected by the Telegram conversation. */
 	public static function onboard( WP_REST_Request $request ): array {
-		$uid      = (int) get_current_user_id();
-		$identity = Store::default()->get_row( 'tb_identity', 'wp_user_id = %d', array( $uid ) );
-		return array(
-			'data' => array(
-				'step'             => (string) ( $request->get_param( 'step' ) ?: 'home' ),
-				'user_id'          => $uid,
-				'language'         => (string) ( $identity['language'] ?? 'en' ),
-				// # missing: real onboarding_state/role are owned by their modules; provisional.
-				'onboarding_state' => 'none',
-				'role'             => 'customer',
-			),
-		);
+		$uid = (int) get_current_user_id();
+		$store = Store::default();
+		$identity = $store->get_row( 'tb_identity', 'wp_user_id = %d', array( $uid ) );
+		$telegram_id = (string) ( $identity['telegram_user_id'] ?? '' );
+		$chat = '' !== $telegram_id ? $store->get_row( 'tb_bot_chats', 'chat_id = %d', array( (int) $telegram_id ) ) : null;
+		$data = $chat ? json_decode( (string) ( $chat['data'] ?? '' ), true ) : array();
+		$data = is_array( $data ) ? $data : array();
+
+		$role = (string) ( $data['role'] ?? 'customer' );
+		$completed = ! empty( $data['completed'] ) && ! empty( $data['language'] ) && in_array( $role, array( 'merchant', 'customer' ), true );
+		$merchant = $store->get_row( 'tb_merchants', 'wp_user_id = %d', array( $uid ) );
+		$verification = $merchant ? (string) ( $merchant['verification_status'] ?? 'none' ) : 'none';
+
+		if ( 'merchant' === $role ) {
+			$screen = 'merchant_home';
+			if ( 'verified' !== $verification ) {
+				$screen = 'merchant_verification';
+			}
+		} else {
+			$screen = 'customer_home';
+		}
+
+		return array( 'data' => array(
+			'completed'           => $completed,
+			'language'            => (string) ( $data['language'] ?? $identity['language'] ?? 'en' ),
+			'role'                => $role,
+			'onboarding_state'    => $completed ? 'complete' : 'incomplete',
+			'launch_screen'       => $screen,
+			'merchant_id'         => $merchant ? (int) $merchant['wp_user_id'] : null,
+			'verification_status' => $verification,
+			'context'             => $data,
+		) );
 	}
 }
