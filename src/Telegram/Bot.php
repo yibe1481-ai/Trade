@@ -44,6 +44,73 @@ final class Bot {
 		) );
 	}
 
+	/**
+	 * Safe admin diagnostics. Never returns the bot token.
+	 * A sendMessage test is optional and only uses the supplied administrator chat ID.
+	 */
+	public function diagnostics( ?int $chat_id = null ): array {
+		$result = array(
+			'token_configured' => $this->token_set(),
+			'api' => array(),
+			'webhook' => array(),
+			'send_test' => null,
+		);
+
+		if ( ! $this->token_set() ) {
+			return $result;
+		}
+
+		foreach ( array( 'getMe' => 'api', 'getWebhookInfo' => 'webhook' ) as $method => $key ) {
+			try {
+				$response = $this->call( $method, array() );
+				$result[ $key ] = array(
+					'ok' => true,
+					'http_status' => 200,
+					'data' => $response['result'] ?? array(),
+				);
+			} catch ( \Throwable $e ) {
+				$result[ $key ] = array(
+					'ok' => false,
+					'error' => $this->safe_exception( $e ),
+				);
+			}
+		}
+
+		if ( null !== $chat_id && $chat_id > 0 ) {
+			try {
+				$response = $this->sendMessage( $chat_id, 'Trade Telegram API diagnostic: outbound messaging is working.' );
+				$result['send_test'] = array(
+					'ok' => true,
+					'http_status' => 200,
+					'data' => $response['result'] ?? array(),
+				);
+			} catch ( \Throwable $e ) {
+				$result['send_test'] = array(
+					'ok' => false,
+					'error' => $this->safe_exception( $e ),
+				);
+			}
+		}
+
+		return $result;
+	}
+
+	private function safe_exception( \Throwable $e ): array {
+		$diagnostic = get_option( 'trade_telegram_last_api_error', array() );
+		$out = array(
+			'exception' => get_class( $e ),
+			'message' => $e->getMessage(),
+		);
+		if ( is_array( $diagnostic ) ) {
+			foreach ( array( 'method', 'http_status', 'code', 'message', 'telegram_description' ) as $key ) {
+				if ( isset( $diagnostic[ $key ] ) && '' !== (string) $diagnostic[ $key ] ) {
+					$out[ $key ] = (string) $diagnostic[ $key ];
+				}
+			}
+		}
+		return $out;
+	}
+
 	private function call( string $method, array $params ): array {
 		if ( ! $this->token_set() ) {
 			Error::throw_( 'TELEGRAM_UNAVAILABLE', 'telegram', 'Telegram bot token is not configured.', array( 'reason' => 'missing_token' ) );
@@ -67,6 +134,14 @@ final class Bot {
 				'desc'   => (string) ( $json['description'] ?? '' ),
 			) );
 		}
+		update_option( 'trade_telegram_last_api_error', array(
+			'method' => $method,
+			'http_status' => 200,
+			'code' => 'OK',
+			'message' => 'Telegram API request succeeded.',
+			'telegram_description' => '',
+			'at' => gmdate( 'c' ),
+		), false );
 		return $json;
 	}
 
@@ -79,12 +154,28 @@ final class Bot {
 		if ( is_wp_error( $resp ) ) {
 			update_option( 'trade_telegram_last_api_error', array(
 				'method' => $method,
+				'http_status' => 0,
 				'code' => $resp->get_error_code(),
 				'message' => $resp->get_error_message(),
+				'telegram_description' => '',
 				'at' => gmdate( 'c' ),
 			), false );
 			return array( '', false );
 		}
-		return array( (string) wp_remote_retrieve_body( $resp ), true );
+
+		$body = (string) wp_remote_retrieve_body( $resp );
+		$status = (int) wp_remote_retrieve_response_code( $resp );
+		$json = json_decode( $body, true );
+		if ( is_array( $json ) && ! ( $json['ok'] ?? false ) ) {
+			update_option( 'trade_telegram_last_api_error', array(
+				'method' => $method,
+				'http_status' => $status,
+				'code' => (string) ( $json['error_code'] ?? 'unknown' ),
+				'message' => 'Telegram API returned an error.',
+				'telegram_description' => (string) ( $json['description'] ?? '' ),
+				'at' => gmdate( 'c' ),
+			), false );
+		}
+		return array( $body, true );
 	}
 }

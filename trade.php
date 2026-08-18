@@ -20,6 +20,7 @@ use Trade\Listings\Service as ListingsService;
 use Trade\Merchant\Service as MerchantService;
 use Trade\Search\Service as SearchService;
 use Trade\Telegram\Webhook;
+use Trade\Telegram\Diagnostics as TelegramDiagnostics;
 use Trade\Orders\Service as OrdersService;
 use Trade\Requests\Service as RequestsService;
 use Trade\Verification\Service as VerificationService;
@@ -31,6 +32,7 @@ use Trade\MiniApp\Service as MiniAppService;
 
 register_activation_hook( __FILE__, array( Db::class, 'install' ) );
 add_action( 'plugins_loaded', array( AdminService::class, 'boot' ) );
+add_action( 'plugins_loaded', array( TelegramDiagnostics::class, 'boot' ) );
 add_action( 'admin_init', array( Db::class, 'maybe_upgrade' ) );
 add_action( 'rest_api_init', array( Rest::class, 'register_routes' ) );
 add_action( 'rest_api_init', array( CatalogService::class, 'routes' ) );
