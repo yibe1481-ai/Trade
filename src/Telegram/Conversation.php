@@ -17,7 +17,7 @@ final class Conversation {
 	public static function step(int $chat_id,string $text,?Store $store=null,?Bot $bot=null,?int $from_id=null): array {
 		$store=$store??Store::default(); $bot=$bot??new Bot(); $from_id??=$chat_id;
 		$state=self::DEFAULT_STATE; $data=array();
-		try { [$state,$data]=self::load($store,$chat_id); } catch (\Throwable $e) { self::log_failure('load',$e,$chat_id); }
+		try { self::ensure_table(); [$state,$data]=self::load($store,$chat_id); } catch (\Throwable $e) { self::log_failure('load',$e,$chat_id); }
 		try { $actions=self::dispatch($store,$state,$data,trim($text),$from_id); } catch (\Throwable $e) {
 			self::log_failure('dispatch',$e,$chat_id);
 			$actions=array('state'=>'main','data'=>$data,'replies'=>array('Sorry, something went wrong. Please try /start again.'));
@@ -26,6 +26,11 @@ final class Conversation {
 		$sent=[]; $sends=$bot->token_set(); $n=count($actions['replies']); $app_idx=$n>0&&!empty($actions['app_button'])?0:null; $menu_idx=$n>0&&!empty($actions['buttons'])?$n-1:null;
 		foreach($actions['replies'] as $i=>$reply){$markup=null; if($sends&&$i===$app_idx)$markup=self::app_markup(); elseif($sends&&$i===$menu_idx)$markup=self::markup($actions['buttons']); if($sends)$bot->sendMessage($chat_id,$reply,null!==$markup?array('reply_markup'=>$markup):array()); $sent[]=$reply;}
 		return $sent;
+	}
+	private static function ensure_table(): void {
+		global $wpdb;
+		if(!isset($wpdb))return;
+		$wpdb->query("CREATE TABLE IF NOT EXISTS `tb_bot_chats` (\n  `chat_id` bigint(20) NOT NULL,\n  `state` varchar(40) NOT NULL DEFAULT 'main',\n  `data` longtext NOT NULL,\n  `updated_at` datetime NOT NULL,\n  PRIMARY KEY (`chat_id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci");
 	}
 	private static function log_failure(string $stage,\Throwable $e,int $chat_id): void { $context=array('stage'=>$stage,'chat_id'=>$chat_id,'type'=>get_class($e),'message'=>$e->getMessage()); update_option('trade_telegram_last_webhook_error',$context,false); if(defined('WP_DEBUG')&&WP_DEBUG)error_log('Trade Telegram webhook failure: '.wp_json_encode($context,JSON_UNESCAPED_UNICODE)); }
 	private static function dispatch(Store $store,string $state,array $data,string $input,int $from_id): array {
