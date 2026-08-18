@@ -241,7 +241,7 @@ final class Conversation {
 		return array(
 			'state'   => 'onboarding',
 			'data'    => array( 'role' => $data['role'] ?? '', 'language' => $code ),
-			'replies' => array( 'All set, ' . ($data['role'] ?? 'customer') . ' — tap the button to open the Mini App.' ),
+			'replies' => array( 'All set, ' . ($data['role'] ?? 'customer') . ' - tap the button to open the Mini App.' ),
 			'app_button' => true,
 		);
 	}
