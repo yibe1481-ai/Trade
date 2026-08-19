@@ -7,6 +7,12 @@
 > (`Admin\Service::render_settings`). Options: `trade_ai_provider` (`` | `openrouter` | `groq`),
 > `trade_ai_openrouter_key` / `trade_ai_openrouter_model`, `trade_ai_groq_key` / `trade_ai_groq_model`.
 > Keys are password fields and never echoed; `ai_status()` shows the resolved provider + model.
+>
+> **Seller Approvals** (submenu `trade-approvals`): merchants with `verification_status = pending`
+> (from in-chat registration) list with their submitted documents and current level, with
+> **Approve / Reject(reason)** actions. Approving verifies the documents, assigns the level
+> (L0–L3 from verified `tb_verification_documents`), writes entitlements, and sends the seller a
+> Telegram congrats; rejection notifies with the admin's reason.
 > Providers are OpenAI-compatible chat endpoints; `Admin\Service::AI_PROVIDERS` lists the defaults
 > (`openai/gpt-4o-mini`, `llama-3.3-70b-versatile`). Full request shape lives in the AI gateway
 > (`AI\Service::config` / `complete`).

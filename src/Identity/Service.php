@@ -44,7 +44,7 @@ final class Service {
 		return array('onboarding_state'=>$completed?'complete':'incomplete','role'=>$role,'language'=>$language,'launch_screen'=>$screen,'verification_status'=>$verification);
 	}
 
-	private static function find_identity(int $telegram_user_id): int {
+	public static function find_identity(int $telegram_user_id): int {
 		$row=Store::default()->get_row('tb_identity','telegram_user_id = %s',array((string)$telegram_user_id)); if($row)return (int)$row['wp_user_id'];
 		$user_id=wp_insert_user(array('user_login'=>'tgu_'.$telegram_user_id,'user_email'=>'tg'.$telegram_user_id.'@local.invalid','user_pass'=>wp_generate_password(64,false,false),'role'=>'subscriber'));
 		if(is_object($user_id)&&method_exists($user_id,'get_error_code'))Error::throw_('INTERNAL_ERROR','identity',Error::text('INTERNAL_ERROR'),array('reason'=>'user_create_failed'));

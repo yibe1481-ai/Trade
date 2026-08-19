@@ -9,6 +9,7 @@ use Trade\Core\Events;
 use Trade\Core\Rest;
 use Trade\Core\Store;
 use Trade\Listings\Service as ListingsService;
+use Trade\Merchant\Service as MerchantService;
 use WP_REST_Request;
 
 /** Merchant verification: mandatory manual MVP workflow. */
@@ -47,6 +48,55 @@ final class Service {
 		else{$reason=(string)$extra['reason']; $store->update('tb_merchants',array('verification_status'=>'revoked','verified_at'=>null),array('wp_user_id'=>$merchant_id)); $store->update_where('tb_verification_documents',array('status'=>'revoked','revoked_at'=>$now,'revocation_reason'=>$reason),'merchant_id = %d',array($merchant_id)); foreach($store->get_rows('tb_listings','merchant_id = %d AND status = %s',array($merchant_id,'ACTIVE')) as $listing){ListingsService::apply_transition($listing,'PAUSED','admin','',$store);} Events::emit('MERCHANT_VERIFICATION_REVOKED',array('merchant_id'=>$merchant_id,'revoked_by'=>$actor,'reason'=>$reason));}
 		Audit::write('verification.transition','merchant',(string)$merchant_id,array('status'=>$from),array('status'=>$to),array('actor'=>$actor,'reason'=>$extra['reason']??''),'user',(string)get_current_user_id(),'rest'); return array('merchant_id'=>$merchant_id,'status'=>$to,'from'=>$from);
 	}
+	/** Document types that count toward the seller level ladder (not the internal 'profile' row). */
+	private const LEVEL_DOCS = array( 'national_id', 'trade_license', 'business_registration' );
+
+	private const LEVEL_CAPS = array(
+		'L0' => array( 'active_listings' => 1,   'images_per_listing' => 1 ),
+		'L1' => array( 'active_listings' => 5,   'images_per_listing' => 3 ),
+		'L2' => array( 'active_listings' => 25,  'images_per_listing' => 5 ),
+		'L3' => array( 'active_listings' => 100, 'images_per_listing' => 10 ),
+	);
+
+	/** Seller level = number of verified documents (national_id/trade_license/business_registration). */
+	public static function level_for( int $merchant_id, ?Store $store = null ): string {
+		$store = $store ?? Store::default();
+		$n = 0;
+		foreach ( $store->get_rows( 'tb_verification_documents', 'merchant_id = %d', array( $merchant_id ) ) as $doc ) {
+			if ( 'verified' === (string) ( $doc['status'] ?? '' ) && in_array( (string) ( $doc['document_type'] ?? '' ), self::LEVEL_DOCS, true ) ) {
+				$n++;
+			}
+		}
+		return 'L' . min( 3, $n );
+	}
+
+	public static function level_caps( string $level ): array {
+		return self::LEVEL_CAPS[ $level ] ?? self::LEVEL_CAPS['L0'];
+	}
+
+	/** Write seller_level + the level's caps as entitlements; returns the level. */
+	public static function sync_level( int $merchant_id, ?Store $store = null ): string {
+		$store = $store ?? Store::default();
+		$level = self::level_for( $merchant_id, $store );
+		MerchantService::set_entitlement( $merchant_id, 'seller_level', $level, $store );
+		foreach ( self::level_caps( $level ) as $key => $value ) {
+			MerchantService::set_entitlement( $merchant_id, $key, (string) $value, $store );
+		}
+		return $level;
+	}
+
+	/** Admin approves the merchant: mark docs verified, transition, recompute level. */
+	public static function approve_documents( int $merchant_id, ?Store $store = null ): array {
+		$store = $store ?? Store::default();
+		$row = self::merchant_row( $merchant_id, $store );
+		if ( null === $row ) {
+			Error::throw_( 'MERCHANT_NOT_FOUND', 'verification', Error::text( 'MERCHANT_NOT_FOUND' ), array( 'merchant_id' => $merchant_id ) );
+		}
+		$transition = self::apply_transition( $row, 'verified', 'admin', array(), $store );
+		$level = self::sync_level( $merchant_id, $store );
+		return array( 'transition' => $transition, 'level' => $level );
+	}
+
 	public static function transition(WP_REST_Request $request): array {
 		$merchant_id=(int)$request->get_param('merchant_id'); $row=self::merchant_row($merchant_id); if(null===$row)Error::throw_('MERCHANT_NOT_FOUND','verification',Error::text('MERCHANT_NOT_FOUND'),array('merchant_id'=>$merchant_id)); $payload=$request->get_json_params()?:array(); return array('data'=>self::apply_transition($row,(string)($payload['to']??''),'admin',array('reason'=>(string)($payload['reason']??''))));
 	}

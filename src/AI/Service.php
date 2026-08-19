@@ -95,10 +95,11 @@ TXT;
 You are the listing assistant for the Trade marketplace in Ethiopia, helping a seller add a listing through chat.
 Ask ONE short, friendly question at a time until you have the item they want to sell, its price in ETB, and the city. Category is optional — infer it from the item if you can.
 Once you have the item and price, confirm: "Draft ready — open the Mini App to add photos and publish."
+If the seller asks to change their profile details, include a "profile" object with exactly ONE field: {"profile":{"field":"business_name"|"merchant_type"|"location","value":"<the new value>"}}. Do NOT fill listing slots in that case.
 Never invent prices, stock, or listings.
 Reply with ONLY a JSON object and nothing else, in this exact shape:
-{"reply":"<your message to the seller, 1-3 short sentences>","slots":{"item":"<what they are selling, or \"\">","price":<number in ETB or 0>,"category":"<category, or \"\">","location":"<city, or \"\">"}}
-Fill "slots" only for what the seller has told you; leave the rest empty (item can stay empty while you are still asking).
+{"reply":"<your message to the seller, 1-3 short sentences>","slots":{"item":"<what they are selling, or \"\">","price":<number in ETB or 0>,"category":"<category, or \"\">","location":"<city, or \"\">"},"profile":{"field":"","value":""}}
+Leave empty values empty; item can stay empty while you are still asking.
 TXT;
 
 	/** Resolve the active provider config from admin options. Never exposes the key by default. */
@@ -205,6 +206,10 @@ TXT;
 		$reply = trim( (string) ( $json['reply'] ?? $raw ) );
 		$slots = is_array( $json['slots'] ?? null ) ? $json['slots'] : array();
 		$slots = array_filter( $slots, static fn( $v ) => is_string( $v ) || is_int( $v ) || is_float( $v ) );
+		// Seller profile-change request can ride at top level of the envelope.
+		if ( is_array( $json['profile'] ?? null ) ) {
+			$slots['profile'] = $json['profile'];
+		}
 		return array( 'reply' => '' !== $reply ? $reply : trim( $raw ), 'slots' => $slots );
 	}
 

@@ -167,6 +167,18 @@ final class Service {
 		return null !== self::entitlement_value( $merchant_id, $key, $store );
 	}
 
+	/** Upsert one entitlement row (seller_level, active_listings, images_per_listing, …). */
+	public static function set_entitlement( int $merchant_id, string $key, string $value, ?Store $store = null ): void {
+		$store = self::store( $store );
+		$where = 'merchant_id = %d AND `key` = %s';
+		$args  = array( $merchant_id, $key );
+		if ( null !== $store->get_row( 'tb_entitlements', $where, $args ) ) {
+			$store->update_where( 'tb_entitlements', array( 'value' => $value ), $where, $args );
+		} else {
+			$store->insert( 'tb_entitlements', array( 'merchant_id' => $merchant_id, 'key' => $key, 'value' => $value ) );
+		}
+	}
+
 	/**
 	 * @param array<string, mixed> $payload
 	 * @param array<int, string>   $errors

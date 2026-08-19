@@ -16,7 +16,16 @@
 > `category`/`location`/`budget_max` params. No match → an honest "couldn't find" reply and no
 > button.
 >
-> **Seller flow (module 13):** role `seller` switches the AI to the listing persona (JSON
+> **Registration (state `seller_reg`):** a first-time seller (role chosen, no merchant yet) is
+> walked through business name → type (product/service) → city → **ID photo → trade-license photo**
+> (stored as `tb_verification_documents`). On completion the merchant profile is created
+> (`verification_status = pending`), the seller gets an Open Mini App button, and the admin approves
+> in the admin menu — which verifies the documents, sets the **level** (L0–L3 = number of verified
+> documents, as `tb_entitlements.seller_level` + caps) and sends the seller a Telegram congrats.
+> Sellers can also update business name / merchant_type / city by talking to the AI bot (the seller
+> persona emits a `profile` field).
+>
+> **Seller flow (module 8):** role `seller` switches the AI to the listing persona (JSON
 > `slots: {item, price, category, location}`). Once item + price are captured the bot resolves the
 > seller's merchant via `tb_identity`→`tb_merchants`, matches category (`tb_categories.slug`) and
 > city (`tb_locations.name_key`, normalized), creates the product + a **DRAFT** listing, and hands

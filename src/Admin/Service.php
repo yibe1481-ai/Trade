@@ -39,6 +39,7 @@ final class Service {
 		add_action( 'admin_head', array( self::class, 'admin_head' ) );
 		add_action( 'admin_post_trade_flag_toggle', array( self::class, 'handle_flag_toggle' ) );
 		add_action( 'admin_post_trade_settings', array( self::class, 'handle_settings' ) );
+		add_action( 'admin_post_trade_merchant_review', array( self::class, 'handle_merchant_review' ) );
 	}
 
 	public static function menu(): void {
@@ -48,6 +49,7 @@ final class Service {
 		add_submenu_page( 'trade', 'Orders', 'Orders', 'manage_options', 'trade-orders', array( self::class, 'render_orders' ) );
 		add_submenu_page( 'trade', 'Listings', 'Listings', 'manage_options', 'trade-listings', array( self::class, 'render_listings' ) );
 		add_submenu_page( 'trade', 'Merchants', 'Merchants', 'manage_options', 'trade-merchants', array( self::class, 'render_merchants' ) );
+		add_submenu_page( 'trade', 'Seller Approvals', 'Seller Approvals', 'manage_options', 'trade-approvals', array( self::class, 'render_approvals' ) );
 		add_submenu_page( 'trade', 'Quality', 'Quality', 'manage_options', 'trade-quality', array( self::class, 'render_quality' ) );
 		add_submenu_page( 'trade', 'Logs', 'Logs', 'manage_options', 'trade-logs', array( self::class, 'render_logs' ) );
 		add_submenu_page( 'trade', 'Settings', 'Settings', 'manage_options', 'trade-settings', array( self::class, 'render_settings' ) );
@@ -55,7 +57,7 @@ final class Service {
 
 	public static function admin_head(): void {
 		$page = sanitize_key( $_GET['page'] ?? '' );
-		$ours = array( 'trade', 'trade-flags', 'trade-orders', 'trade-listings', 'trade-merchants', 'trade-quality', 'trade-logs', 'trade-settings' );
+		$ours = array( 'trade', 'trade-flags', 'trade-orders', 'trade-listings', 'trade-merchants', 'trade-approvals', 'trade-quality', 'trade-logs', 'trade-settings' );
 		if ( ! in_array( $page, $ours, true ) ) {
 			return;
 		}
@@ -346,6 +348,74 @@ final class Service {
 		echo '</div>';
 	}
 
+	// ── Seller Approvals (in-chat registrations) ─────────────────────────────
+
+	public static function render_approvals(): void {
+		self::allowed();
+		self::header( 'Seller Approvals', 'Approve or reject seller registrations submitted in the Telegram chat. Approving verifies their documents and raises their level.' );
+
+		if ( isset( $_GET['saved'] ) ) {
+			echo '<div class="trade-ok">Review saved.</div>';
+		}
+
+		echo '<h2>Pending approval</h2>';
+		self::table(
+			array( 'business', 'type', 'location', 'documents', 'level', 'decision' ),
+			self::rows( "SELECT * FROM tb_merchants WHERE verification_status = 'pending' ORDER BY wp_user_id DESC" ),
+			array(
+				0 => static fn( $r ) => '<strong>' . esc_html( (string) $r['business_name'] ) . '</strong>',
+				1 => static fn( $r ) => esc_html( (string) $r['merchant_type'] ),
+				2 => static fn( $r ) => esc_html( self::location_name( (int) $r['location_id'] ) ),
+				3 => static fn( $r ) => esc_html( self::merchant_docs( (int) $r['wp_user_id'] ) ),
+				4 => static fn( $r ) => '<span class="trade-badge off">' . esc_html( \Trade\Verification\Service::level_for( (int) $r['wp_user_id'] ) ) . '</span>',
+				5 => static fn( $r ) => self::review_controls( (int) $r['wp_user_id'] ),
+			)
+		);
+
+		echo '<h2>Verified sellers</h2>';
+		self::table(
+			array( 'business', 'type', 'level', 'verified_at' ),
+			self::rows( "SELECT * FROM tb_merchants WHERE verification_status = 'verified' ORDER BY wp_user_id DESC" ),
+			array(
+				0 => static fn( $r ) => '<strong>' . esc_html( (string) $r['business_name'] ) . '</strong>',
+				1 => static fn( $r ) => esc_html( (string) $r['merchant_type'] ),
+				2 => static fn( $r ) => '<span class="trade-badge on">' . esc_html( \Trade\Verification\Service::level_for( (int) $r['wp_user_id'] ) ) . '</span>',
+				3 => static fn( $r ) => esc_html( (string) ( $r['verified_at'] ?? '' ) ),
+			)
+		);
+		echo '</div>';
+	}
+
+	private static function location_name( int $location_id ): string {
+		$rows = self::rows( 'SELECT name_key FROM tb_locations WHERE id = ' . (int) $location_id . ' LIMIT 1' );
+		return $rows ? (string) $rows[0]['name_key'] : '—';
+	}
+
+	private static function merchant_docs( int $merchant_id ): string {
+		$out = array();
+		foreach ( self::rows( 'SELECT document_type, status FROM tb_verification_documents WHERE merchant_id = ' . (int) $merchant_id . ' ORDER BY id' ) as $d ) {
+			$out[] = (string) $d['document_type'] . ':' . (string) $d['status'];
+		}
+		return $out ? implode( ', ', $out ) : '—';
+	}
+
+	private static function review_controls( int $merchant_id ): string {
+		$approve = '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="display:inline">'
+			. wp_nonce_field( 'trade_merchant_review', '_wpnonce', true, false )
+			. '<input type="hidden" name="action" value="trade_merchant_review">'
+			. '<input type="hidden" name="merchant_id" value="' . (int) $merchant_id . '">'
+			. '<input type="hidden" name="decision" value="approve">'
+			. '<button class="button button-primary button-small">Approve</button></form> ';
+		$reject = '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="display:inline">'
+			. wp_nonce_field( 'trade_merchant_review', '_wpnonce', true, false )
+			. '<input type="hidden" name="action" value="trade_merchant_review">'
+			. '<input type="hidden" name="merchant_id" value="' . (int) $merchant_id . '">'
+			. '<input type="hidden" name="decision" value="reject">'
+			. '<input type="text" name="reason" placeholder="reason (required)" class="regular-text" style="max-width:160px" required>'
+			. '<button class="button button-small">Reject</button></form>';
+		return $approve . $reject;
+	}
+
 	// ── Quality (reports + reviews) ──────────────────────────────────────────
 
 	public static function render_quality(): void {
@@ -477,5 +547,52 @@ final class Service {
 		}
 		wp_safe_redirect( admin_url( 'admin.php?page=trade-settings&saved=1' ) );
 		exit;
+	}
+
+	// ── Seller review (approve / reject) ────────────────────────────────────
+
+	public static function handle_merchant_review(): void {
+		self::allowed();
+		check_admin_referer( 'trade_merchant_review' );
+		$merchant_id = (int) ( $_POST['merchant_id'] ?? 0 );
+		$decision    = sanitize_key( $_POST['decision'] ?? '' );
+		$reason      = trim( (string) wp_unslash( $_POST['reason'] ?? '' ) );
+		if ( $merchant_id <= 0 || ! in_array( $decision, array( 'approve', 'reject' ), true ) ) {
+			wp_die( 'Invalid review request.' );
+		}
+		try {
+			if ( 'approve' === $decision ) {
+				$out   = \Trade\Verification\Service::approve_documents( $merchant_id );
+				$level = is_array( $out ) ? (string) ( $out['level'] ?? 'L0' ) : 'L0';
+				self::notify_seller( $merchant_id, "🎉 Congratulations! Your seller account is verified — {$level} seller. You can now publish listings." );
+			} else {
+				if ( '' === $reason ) {
+					wp_die( 'A reason is required to reject.' );
+				}
+				$row = \Trade\Verification\Service::merchant_row( $merchant_id );
+				\Trade\Verification\Service::apply_transition( $row, 'rejected', 'admin', array( 'reason' => $reason ) );
+				self::notify_seller( $merchant_id, "Your seller registration was not approved: {$reason}\n\nUpdate your details and we can review again." );
+			}
+		} catch ( \Throwable $e ) {
+			wp_die( esc_html( $e->getMessage() ) );
+		}
+		wp_safe_redirect( admin_url( 'admin.php?page=trade-approvals&saved=1' ) );
+		exit;
+	}
+
+	/** Best-effort Telegram notice to the seller; never blocks the admin action. */
+	private static function notify_seller( int $merchant_id, string $text ): void {
+		try {
+			$rows = self::rows( 'SELECT telegram_user_id FROM tb_identity WHERE wp_user_id = ' . (int) $merchant_id . ' LIMIT 1' );
+			if ( ! $rows ) {
+				return;
+			}
+			$bot = new \Trade\Telegram\Bot();
+			if ( $bot->token_set() ) {
+				$bot->sendMessage( (int) $rows[0]['telegram_user_id'], $text );
+			}
+		} catch ( \Throwable $e ) {
+			// notice is best-effort
+		}
 	}
 }
