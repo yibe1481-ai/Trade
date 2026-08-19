@@ -21,6 +21,48 @@ final class Service {
 		Rest::register( 'categories/(?P<id>[0-9]+)/attributes', 'GET', '', array( self::class, 'category_attributes' ) );
 		Rest::register( 'products', 'GET', '', array( self::class, 'products' ) );
 		Rest::register( 'products', 'POST', 'tb_session', array( self::class, 'product_create' ) );
+		Rest::register( 'locations', 'GET', '', array( self::class, 'locations' ) );
+	}
+
+	/** GET catalog/locations?parent_id=N — children of a location (country → region → city). */
+	public static function locations( WP_REST_Request $request ): array {
+		$parent = (int) ( $request->get_param( 'parent_id' ) ?? 0 );
+		return array( 'data' => self::location_children( $parent ) );
+	}
+
+	/** Children of a location as {id, parent_id, level, name}; roots returned when $parent_id <= 0. */
+	public static function location_children( int $parent_id, ?Store $store = null ): array {
+		$store = self::store( $store );
+		$where = $parent_id > 0 ? 'parent_id = %d' : 'level = 0';
+		$args  = $parent_id > 0 ? array( $parent_id ) : array();
+		$out   = array();
+		$seen  = array();
+		foreach ( $store->get_rows( 'tb_locations', $where, $args ) as $row ) {
+			$name = self::location_name( (string) ( $row['name_key'] ?? '' ) );
+			if ( isset( $seen[ $name ] ) ) {
+				continue; // duplicate seed rows share a name_key
+			}
+			$seen[ $name ] = true;
+			$out[]         = array(
+				'id'        => (int) ( $row['id'] ?? 0 ),
+				'parent_id' => isset( $row['parent_id'] ) && null !== $row['parent_id'] ? (int) $row['parent_id'] : null,
+				'level'     => (int) ( $row['level'] ?? 0 ),
+				'name'      => $name,
+			);
+		}
+		usort( $out, static fn( $a, $b ) => strcmp( $a['name'], $b['name'] ) );
+		return $out;
+	}
+
+	/** Prettify a name_key: 'LOCATION_ADDIS_ABABA' → 'Addis Ababa' (translation rows not seeded). */
+	private static function location_name( string $name_key ): string {
+		$raw = \Trade\Localization\Lang::text( $name_key, 'en' );
+		if ( $raw === $name_key ) {
+			$raw = preg_replace( '/^LOCATION_/', '', $name_key ) ?? $name_key;
+		}
+		$words  = array_filter( preg_split( '/[\s_]+/', strtolower( $raw ) ) ?: array(), static fn( $w ) => '' !== $w );
+		$pretty = implode( ' ', array_map( static fn( $w ) => strtoupper( $w[0] ) . substr( $w, 1 ), $words ) );
+		return '' !== $pretty ? $pretty : $raw;
 	}
 
 	/** Phase-4 locations are catalog-owned and seed-backed. */

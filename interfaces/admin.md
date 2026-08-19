@@ -9,7 +9,8 @@
 > Keys are password fields and never echoed; `ai_status()` shows the resolved provider + model.
 >
 > **Seller Approvals** (submenu `trade-approvals`): merchants with `verification_status = pending`
-> (from in-chat registration) list with their submitted documents and current level, with
+> (registered in the Mini App — `view=register`; cascading locations + document upload via
+> `catalog/locations` and `verification/documents`) list with their submitted documents and current level, with
 > **Approve / Reject(reason)** actions. Approving verifies the documents, assigns the level
 > (L0–L3 from verified `tb_verification_documents`), writes entitlements, and sends the seller a
 > Telegram congrats; rejection notifies with the admin's reason.

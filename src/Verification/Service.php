@@ -25,6 +25,7 @@ final class Service {
 		Rest::register('verification','POST','tb_manage_own_merchant_profile',array(self::class,'create'));
 		Rest::register('verification/(?P<merchant_id>[0-9]+)','GET','tb_manage_own_merchant_profile',array(self::class,'read'));
 		Rest::register('verification/(?P<merchant_id>[0-9]+)/transition','POST','manage_options',array(self::class,'transition'));
+		Rest::register('verification/documents','POST','tb_manage_own_merchant_profile',array(self::class,'document_upload'));
 	}
 	public static function create(WP_REST_Request $request): array { $payload=$request->get_json_params()?:array(); $merchant_id=(int)($payload['merchant_id']??get_current_user_id()); if($merchant_id!==get_current_user_id()&&!current_user_can('manage_options'))Error::throw_('FORBIDDEN_NOT_OWNER','verification',Error::text('FORBIDDEN_NOT_OWNER'),array('merchant_id'=>$merchant_id)); return array('data'=>self::create_verification($merchant_id)); }
 	public static function read(WP_REST_Request $request): array { $merchant_id=(int)$request->get_param('merchant_id'); $row=self::merchant_row($merchant_id); if(null===$row)Error::throw_('MERCHANT_NOT_FOUND','verification',Error::text('MERCHANT_NOT_FOUND'),array('merchant_id'=>$merchant_id)); if($merchant_id!==get_current_user_id()&&!current_user_can('manage_options'))Error::throw_('FORBIDDEN_NOT_OWNER','verification',Error::text('FORBIDDEN_NOT_OWNER'),array('merchant_id'=>$merchant_id)); return array('data'=>$row); }
@@ -97,7 +98,56 @@ final class Service {
 		return array( 'transition' => $transition, 'level' => $level );
 	}
 
-	public static function transition(WP_REST_Request $request): array {
+	/** Upload a verification document file (multipart) and store it as a pending doc row. */
+	public static function document_upload( WP_REST_Request $request ): array {
+		$merchant_id   = (int) $request->get_param( 'merchant_id' );
+		$document_type = sanitize_key( (string) $request->get_param( 'document_type' ) );
+		$row           = self::merchant_row( $merchant_id );
+		if ( null === $row ) {
+			Error::throw_( 'MERCHANT_NOT_FOUND', 'verification', Error::text( 'MERCHANT_NOT_FOUND' ), array( 'merchant_id' => $merchant_id ) );
+		}
+		if ( $merchant_id !== get_current_user_id() && ! current_user_can( 'manage_options' ) ) {
+			Error::throw_( 'FORBIDDEN_NOT_OWNER', 'core', Error::text( 'FORBIDDEN_NOT_OWNER' ), array( 'merchant_id' => $merchant_id ) );
+		}
+		if ( ! in_array( $document_type, array( 'national_id', 'trade_license', 'business_registration' ), true ) ) {
+			throw Error::validation( array( 'document_type' ), 'verification' );
+		}
+		$files = $request->get_file_params();
+		$file  = $files['file'] ?? null;
+		if ( ! is_array( $file ) || (int) ( $file['error'] ?? 4 ) !== UPLOAD_ERR_OK ) {
+			throw Error::validation( array( 'file' ), 'verification' );
+		}
+		$storage = self::store_document_file( (string) ( $file['tmp_name'] ?? '' ) );
+		return array( 'data' => self::upload_document( $merchant_id, $document_type, $storage ) );
+	}
+
+	/** Insert a pending verification document (service-level). */
+	public static function upload_document( int $merchant_id, string $document_type, string $storage_key, ?Store $store = null ): array {
+		$store = $store ?? Store::default();
+		$now   = gmdate( 'Y-m-d H:i:s' );
+		$store->insert( 'tb_verification_documents', array(
+			'merchant_id'   => $merchant_id,
+			'document_type' => $document_type,
+			'storage_key'   => $storage_key,
+			'status'        => 'pending',
+			'created_at'    => $now,
+			'updated_at'    => $now,
+		) );
+		return array( 'document_id' => (int) $store->last_insert_id(), 'merchant_id' => $merchant_id, 'document_type' => $document_type, 'status' => 'pending' );
+	}
+
+	private static function store_document_file( string $tmp_name ): string {
+		$storage_key = bin2hex( random_bytes( 16 ) );
+		$dirs        = function_exists( 'wp_upload_dir' ) ? (array) wp_upload_dir() : array( 'basedir' => ABSPATH . 'wp-content/uploads' );
+		$target      = rtrim( (string) ( $dirs['basedir'] ?? ABSPATH . 'wp-content/uploads' ), '/' ) . '/trade-media';
+		if ( ! is_dir( $target ) ) {
+			@mkdir( $target, 0755, true );
+		}
+		@copy( $tmp_name, $target . '/' . $storage_key );
+		return $storage_key;
+	}
+
+public static function transition(WP_REST_Request $request): array {
 		$merchant_id=(int)$request->get_param('merchant_id'); $row=self::merchant_row($merchant_id); if(null===$row)Error::throw_('MERCHANT_NOT_FOUND','verification',Error::text('MERCHANT_NOT_FOUND'),array('merchant_id'=>$merchant_id)); $payload=$request->get_json_params()?:array(); return array('data'=>self::apply_transition($row,(string)($payload['to']??''),'admin',array('reason'=>(string)($payload['reason']??''))));
 	}
 }

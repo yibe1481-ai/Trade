@@ -103,18 +103,18 @@ final class Conversation {
     		$role         = str_replace( 'role:', '', $input );
     		$data['role'] = $role;
 
-    		// First-time seller → in-chat registration (business details + ID/license photos).
+    		// First-time seller → registration lives in the Mini App (dynamic location + documents).
     		if ( 'seller' === $role && null === self::seller_merchant_id( $user_id, $store ) ) {
-    			self::save_state( $store, $user_id, 'seller_reg', array(
-    				'role'     => 'seller',
-    				'language' => (string) ( $data['language'] ?? 'en' ),
-    				'reg_step' => 'business_name',
+    			self::save_state( $store, $user_id, 'main', array_merge(
+    				$data,
+    				array( 'role' => 'seller', 'language' => (string) ( $data['language'] ?? 'en' ), 'completed' => false )
     			) );
-    			$msg = "🏪 Great, let's set up your seller account.\n\nWhat's your business name?";
+    			$msg = "🏪 Great! To start selling, complete your registration in the Mini App — business details, country/region/city, and your identity documents. I'll help you add listings here once you're registered.";
+    			$btn = self::app_button( self::mini_app_url( 'view=register' ) );
     			if ( null !== $message_id && $message_id > 0 ) {
-    				$bot->editMessageText( $chat_id, $message_id, $msg );
+    				$bot->editMessageText( $chat_id, $message_id, $msg, array( 'reply_markup' => $btn ) );
     			} else {
-    				$bot->sendMessage( $chat_id, $msg );
+    				$bot->sendMessage( $chat_id, $msg, array( 'reply_markup' => $btn ) );
     			}
     			return;
     		}
@@ -132,12 +132,6 @@ final class Conversation {
     			// Attach the anchored reply keyboard to the welcome itself (no extra message).
     			$bot->sendMessage( $chat_id, $msg, array( 'reply_markup' => self::anchor_markup() ) );
     		}
-    		return;
-    	}
-
-    	// 3a. In-chat seller registration state machine.
-    	if ( 'seller_reg' === $current_step ) {
-    		self::seller_registration( $chat_id, $input, $data, $store, $user_id, $bot, $message_id );
     		return;
     	}
 
@@ -297,74 +291,7 @@ final class Conversation {
     	return array( 'text' => 'I can update your business name, type (product/service), or city. Try again.', 'markup' => self::anchor_markup() );
     }
 
-    /**
-     * First-time seller registration state machine (state 'seller_reg').
-     * Steps: business_name → merchant_type → location → doc_id → doc_license (photos).
-     */
-    private static function seller_registration( int $chat_id, string $input, array $data, Store $store, int $user_id, Bot $bot, ?int $message_id ): void {
-    	$step = (string) ( $data['reg_step'] ?? 'business_name' );
-
-    	if ( 'business_name' === $step ) {
-    		$name = trim( $input );
-    		if ( '' === $name ) {
-    			$bot->sendMessage( $chat_id, "What's your business name?" );
-    			return;
-    		}
-    		$data['reg_name'] = $name;
-    		$data['reg_step'] = 'merchant_type';
-    		self::save_state( $store, $user_id, 'seller_reg', $data );
-    		$bot->sendMessage( $chat_id, 'What do you sell?', array( 'reply_markup' => self::reg_type_markup() ) );
-    		return;
-    	}
-
-    	if ( 'merchant_type' === $step ) {
-    		if ( 'mtype:product' === $input ) {
-    			$data['reg_type'] = 'product';
-    		} elseif ( 'mtype:service' === $input ) {
-    			$data['reg_type'] = 'service';
-    		} else {
-    			$bot->sendMessage( $chat_id, 'Choose a type:', array( 'reply_markup' => self::reg_type_markup() ) );
-    			return;
-    		}
-    		$data['reg_step'] = 'location';
-    		self::save_state( $store, $user_id, 'seller_reg', $data );
-    		$bot->sendMessage( $chat_id, "Which city is your business in?" );
-    		return;
-    	}
-
-    	if ( 'location' === $step ) {
-    		$loc_id = self::resolve_location_id( $input, $store );
-    		if ( null === $loc_id ) {
-    			$bot->sendMessage( $chat_id, 'Pick a city: ' . self::name_list( 'tb_locations', 'name_key', $store ) );
-    			return;
-    		}
-    		$wp_user_id    = \Trade\Identity\Service::find_identity( $user_id );
-    		$data['wp_user_id'] = $wp_user_id;
-    		$data['reg_location_id'] = $loc_id;
-    		$data['reg_step'] = 'doc_id';
-    		\Trade\Merchant\Service::create_profile( array(
-    			'business_name' => (string) ( $data['reg_name'] ?? '' ),
-    			'merchant_type' => (string) ( $data['reg_type'] ?? 'product' ),
-    			'location_id'   => $loc_id,
-    		), $wp_user_id, $store );
-    		\Trade\Verification\Service::create_verification( $wp_user_id, $store ); // → pending + profile doc
-    		self::save_state( $store, $user_id, 'seller_reg', $data );
-    		$bot->sendMessage( $chat_id, "📸 Now send a clear photo of your national ID." );
-    		return;
-    	}
-
-    	// doc_id / doc_license arrive as photos (handled in photo()); text here = nudge.
-    	$bot->sendMessage( $chat_id, 'Please send a photo so we can verify your documents.' );
-    }
-
-    private static function reg_type_markup(): array {
-    	return array( 'inline_keyboard' => array( array(
-    		array( 'text' => '🏷 Product', 'callback_data' => 'mtype:product' ),
-    		array( 'text' => '🛎 Service', 'callback_data' => 'mtype:service' ),
-    	) ) );
-    }
-
-    /** Save photo bytes to uploads/trade-media/<key>; returns the storage key. */
+/** Save photo bytes to uploads/trade-media/<key>; returns the storage key. */
     private static function persist_photo_bytes( string $bytes ): string {
     	$storage_key = bin2hex( random_bytes( 16 ) );
     	$dirs        = function_exists( 'wp_upload_dir' ) ? (array) wp_upload_dir() : array( 'basedir' => ABSPATH . 'wp-content/uploads' );
@@ -477,15 +404,7 @@ final class Conversation {
     		return;
     	}
 
-    	// Registration documents (state seller_reg, steps doc_id / doc_license).
-    	$row  = $store->get_row( 'tb_bot_chats', 'chat_id = %d', array( $user_id ) );
-    	$data = is_array( $row ) ? ( json_decode( (string) ( $row['data'] ?? '' ), true ) ?? array() ) : array();
-    	if ( 'seller_reg' === (string) ( $row['state'] ?? '' ) ) {
-    		self::registration_photo( $chat_id, $file_id, $data, $store, $user_id, $bot );
-    		return;
-    	}
-
-    	$merchant = self::seller_merchant_id( $user_id, $store );
+$merchant = self::seller_merchant_id( $user_id, $store );
     	if ( null === $merchant ) {
     		return;
     	}
@@ -518,54 +437,7 @@ final class Conversation {
     	return '' !== $file_path ? $bot->download_file( $file_path ) : '';
     }
 
-    /** Store one registration document photo and advance the seller_reg flow. */
-    private static function registration_photo( int $chat_id, string $file_id, array $data, Store $store, int $user_id, Bot $bot ): void {
-    	$step = (string) ( $data['reg_step'] ?? '' );
-    	if ( ! in_array( $step, array( 'doc_id', 'doc_license' ), true ) ) {
-    		$bot->sendMessage( $chat_id, 'Send the document photo we asked for.' );
-    		return;
-    	}
-    	try {
-    		$bytes = self::download_photo_bytes( $bot, $file_id );
-    		if ( '' === $bytes ) {
-    			return;
-    		}
-    		$merchant_id = (int) ( $data['wp_user_id'] ?? 0 );
-    		if ( $merchant_id <= 0 ) {
-    			return;
-    		}
-    		$now      = gmdate( 'Y-m-d H:i:s' );
-    		$doc_type = 'doc_id' === $step ? 'national_id' : 'trade_license';
-    		$store->insert( 'tb_verification_documents', array(
-    			'merchant_id'   => $merchant_id,
-    			'document_type' => $doc_type,
-    			'storage_key'   => self::persist_photo_bytes( $bytes ),
-    			'status'        => 'pending',
-    			'created_at'    => $now,
-    			'updated_at'    => $now,
-    		) );
-
-    		if ( 'doc_id' === $step ) {
-    			$data['reg_step'] = 'doc_license';
-    			self::save_state( $store, $user_id, 'seller_reg', $data );
-    			$bot->sendMessage( $chat_id, '✅ ID photo received. Now send a photo of your trade license.' );
-    		} else {
-    			unset( $data['reg_step'] );
-    			$data['completed'] = true;
-    			$data['role']      = 'seller';
-    			self::save_state( $store, $user_id, 'completed', $data );
-    			$bot->sendMessage(
-    				$chat_id,
-    				"✅ Registration submitted for admin review.\n\nYou can start adding listings now — open the Mini App to explore and manage.",
-    				array( 'reply_markup' => self::app_button( self::mini_app_url( 'view=my_listings' ) ) )
-    			);
-    		}
-    	} catch ( \Throwable $e ) {
-    		// # ponytail: swallow photo failures — never 500 the webhook over a photo.
-    	}
-    }
-    
-    /** Helper method to persist conversation state cleanly */
+/** Helper method to persist conversation state cleanly */
     private static function save_state( Store $store, int $chat_id, string $state, array $data ): void {
     	$fields = array(
     		'state'      => $state,

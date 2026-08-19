@@ -6,7 +6,7 @@
 <title>Trade</title>
 <style>
 :root{--bg:#fff;--fg:#222;--accent:#2e6ff2;--muted:#707579;--card:#f4f4f5}
-body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg);padding:16px}.card{background:var(--card);border-radius:14px;padding:16px;margin:10px 0}.row{display:flex;align-items:center;gap:10px}.avatar{width:44px;height:44px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700}h1{font-size:20px;margin:0 0 4px}.muted{color:var(--muted);font-size:13px}.hero{font-size:18px;font-weight:700}.pill{display:inline-block;padding:5px 9px;border-radius:999px;background:var(--bg);margin:4px 4px 0 0;font-size:12px}button{width:100%;padding:13px;border:0;border-radius:10px;background:var(--accent);color:#fff;font-size:15px;font-weight:600;margin-top:10px}.hide{display:none}.err{color:#c62828}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg);padding:16px}.card{background:var(--card);border-radius:14px;padding:16px;margin:10px 0}.row{display:flex;align-items:center;gap:10px}.avatar{width:44px;height:44px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700}h1{font-size:20px;margin:0 0 4px}.muted{color:var(--muted);font-size:13px}.hero{font-size:18px;font-weight:700}.pill{display:inline-block;padding:5px 9px;border-radius:999px;background:var(--bg);margin:4px 4px 0 0;font-size:12px}button{width:100%;padding:13px;border:0;border-radius:10px;background:var(--accent);color:#fff;font-size:15px;font-weight:600;margin-top:10px}.hide{display:none}.err{color:#c62828}.field{width:100%;box-sizing:border-box;padding:12px;border:1px solid rgba(127,127,127,.35);border-radius:10px;font-size:15px;margin:6px 0;background:var(--bg);color:var(--fg)}.seg{display:flex;gap:8px;margin:6px 0}.segBtn{flex:1;margin:0;padding:11px;border:1px solid rgba(127,127,127,.35);background:var(--bg);color:var(--fg);border-radius:10px}.segBtn.on{background:var(--accent);color:#fff;border-color:var(--accent)}.up{flex:1;text-align:center;padding:16px 8px;border:1.5px dashed rgba(127,127,127,.5);border-radius:12px;color:var(--muted);font-size:13px}.up.has{background:var(--card);border-color:var(--accent);color:var(--fg)}
 </style>
 </head>
 <body>
@@ -14,6 +14,21 @@ body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;bac
 <div class="card" id="statusCard"><div class="muted" id="status">Signing in…</div><div id="err" class="hide err"></div></div>
 <div class="card hide" id="contextCard"><div class="hero" id="welcome"></div><div class="muted" id="details"></div><div id="verification"></div></div>
 <div class="card hide" id="resultsCard"><div class="hero" id="resultsHead"></div><div class="muted" id="resultsMeta"></div><div id="results"></div></div>
+<div class="card hide" id="regCard">
+ <div class="hero">Seller registration</div>
+ <div class="muted" style="margin-bottom:10px">Set up your seller account to start listing on Trade.</div>
+ <input id="regName" class="field" placeholder="Business name" autocomplete="off">
+ <div class="seg" id="regType"><button type="button" class="segBtn on" data-type="product">🏷 Product</button><button type="button" class="segBtn" data-type="service">🛎 Service</button></div>
+ <select id="regCountry" class="field"><option value="">Country…</option></select>
+ <select id="regRegion" class="field" disabled><option value="">Region…</option></select>
+ <select id="regCity" class="field" disabled><option value="">City…</option></select>
+ <div class="row" style="margin-top:10px">
+  <label class="up" id="upId">🪪 National ID<input type="file" id="fileId" accept="image/*" class="hide"></label>
+  <label class="up" id="upLic">📜 Trade license<input type="file" id="fileLic" accept="image/*" class="hide"></label>
+ </div>
+ <div class="muted" id="regHint"></div>
+ <button id="regSubmit" class="hide">Submit registration</button>
+</div>
 <button class="hide" id="continueBtn">Continue</button>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script>
@@ -32,11 +47,55 @@ body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;bac
    var r=await fetch(REST+'mini_app/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:tg.initData})});
    var j=await r.json(); if(!j.success){fail((j.error&&j.error.message)||'Login failed');return}
    token=j.data.session_token; ctx=j.data;
+   if(qp.get('view')==='register'){await loadRegistration();return;}
    if(filters.category){await loadResults();}else{await loadContext();}
   }catch(e){fail('Network error. Please try again.');}
  }
  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
  function caps(s){s=String(s||'');return s.charAt(0).toUpperCase()+s.slice(1)}
+ var reg={type:'product',country:null,region:null,city:null,idFile:null,licFile:null};
+ async function api(path,opts){opts=opts||{};opts.headers=Object.assign({'Authorization':'Bearer '+token},opts.headers||{});var r=await fetch(REST+path,opts);return r.json();}
+ async function loadRegistration(){
+  try{
+   status('Loading registration…');show('regCard');$('regSubmit').classList.remove('hide');
+   var j=await api('locations');if(!j.success){fail((j.error&&j.error.message)||'Could not load locations.');return}
+   var sel=$('regCountry');sel.innerHTML='<option value="">Country…</option>';
+   for(var i=0;i<(j.data||[]).length;i++){var l=j.data[i],o=document.createElement('option');o.value=l.id;o.textContent=l.name;sel.appendChild(o);}
+   status('Ready');
+  }catch(e){fail('Could not load registration.');}
+ }
+ async function loadChildren(selId,parentId,placeholder){
+  try{
+   var sel=$(selId);sel.innerHTML='<option value="">'+placeholder+'</option>';sel.disabled=true;
+   var j=await api('locations'+(parentId?('?parent_id='+parentId):''));
+   if(j.success){for(var i=0;i<(j.data||[]).length;i++){var l=j.data[i],o=document.createElement('option');o.value=l.id;o.textContent=l.name;sel.appendChild(o);}}
+   sel.disabled=false;
+  }catch(e){$(selId).disabled=false;}
+ }
+ $('regCountry').addEventListener('change',function(){reg.country=this.value;reg.region=null;reg.city=null;$('regCity').innerHTML='<option value="">City…</option>';$('regCity').disabled=true;loadChildren('regRegion',this.value,'Region…');});
+ $('regRegion').addEventListener('change',function(){reg.region=this.value;reg.city=null;loadChildren('regCity',this.value,'City…');});
+ $('regCity').addEventListener('change',function(){reg.city=this.value;});
+ Array.prototype.forEach.call(document.querySelectorAll('#regType .segBtn'),function(b){b.addEventListener('click',function(){Array.prototype.forEach.call(document.querySelectorAll('#regType .segBtn'),function(x){x.classList.remove('on')});b.classList.add('on');reg.type=b.getAttribute('data-type');});});
+ $('fileId').addEventListener('change',function(){reg.idFile=this.files&&this.files[0]||null;$('upId').classList.toggle('has',!!reg.idFile);});
+ $('fileLic').addEventListener('change',function(){reg.licFile=this.files&&this.files[0]||null;$('upLic').classList.toggle('has',!!reg.licFile);});
+ $('regSubmit').addEventListener('click',async function(){
+  var name=$('regName').value.trim(),locId=parseInt(reg.city||reg.region||reg.country,10)||0;
+  if(!name){$('regHint').textContent='Enter your business name.';return}
+  if(!locId){$('regHint').textContent='Pick your country, region, and city.';return}
+  if(!reg.idFile||!reg.licFile){$('regHint').textContent='Add your national ID and trade-license photos.';return}
+  try{
+   status('Submitting registration…');
+   var m=await api('merchants',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({business_name:name,merchant_type:reg.type,location_id:locId})});
+   if(!m.success){fail((m.error&&m.error.message)||'Could not save your business.');return}
+   ctx.merchant_id=m.data.id||0;
+   await api('verification',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({merchant_id:ctx.merchant_id})});
+   var up=function(field,docType){var fd=new FormData();fd.append('merchant_id',ctx.merchant_id);fd.append('document_type',docType);fd.append('file',reg[field]);return api('verification/documents',{method:'POST',body:fd});};
+   await up('idFile','national_id');await up('licFile','trade_license');
+   status('Ready');
+   $('regCard').innerHTML='<div class="hero">✅ Registration submitted</div><div class="muted">Your seller account is under admin review. You can add listings in the meantime.</div>';
+   $('continueBtn').textContent='Open workspace';show('continueBtn');
+  }catch(e){fail('Could not submit registration.');}
+ });
  async function loadResults(){
   try{
    status('Searching '+filters.category+'…');

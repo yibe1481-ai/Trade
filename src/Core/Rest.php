@@ -51,7 +51,15 @@ final class Rest {
 				wp_set_current_user( $auth['user_id'] );
 			}
 
-			if ( ! current_user_can( $capability ) ) {
+			// Custom 'tb_*' capabilities are never registered with WP roles — they mean
+			// "any authenticated session" (mini app / merchant endpoints). Real role caps
+			// (manage_options, …) still go through current_user_can().
+			if ( in_array( $capability, array( 'tb_session', 'tb_manage_own_merchant_profile' ), true ) ) {
+				$allowed = $auth['user_id'] > 0;
+			} else {
+				$allowed = current_user_can( $capability );
+			}
+			if ( ! $allowed ) {
 				return self::reply( Error::envelope( 'FORBIDDEN_CAPABILITY', 'core', Error::text( 'FORBIDDEN_CAPABILITY' ) ), $request_id, Error::status( 'FORBIDDEN_CAPABILITY' ) );
 			}
 		}
