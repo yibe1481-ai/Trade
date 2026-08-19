@@ -113,10 +113,9 @@ final class Conversation {
     		if ( null !== $message_id && $message_id > 0 ) {
     			$bot->editMessageText( $chat_id, $message_id, $msg );
     		} else {
-    			$bot->sendMessage( $chat_id, $msg );
+    			// Attach the anchored reply keyboard to the welcome itself (no extra message).
+    			$bot->sendMessage( $chat_id, $msg, array( 'reply_markup' => self::anchor_markup() ) );
     		}
-    		// Anchored reply keyboard so language/role can be changed anytime.
-    		$bot->sendMessage( $chat_id, 'You can change your language or role anytime:', array( 'reply_markup' => self::anchor_markup() ) );
     		return;
     	}
 
@@ -130,7 +129,7 @@ final class Conversation {
     		return;
     	}
     	if ( in_array( $input, array( '🏠 Home', '/home' ), true ) ) {
-    		$bot->sendMessage( $chat_id, 'You can change your language or role anytime, or open the Mini App:', array( 'reply_markup' => self::anchor_markup() ) );
+    		$bot->sendMessage( $chat_id, 'Choose an option:', array( 'reply_markup' => self::anchor_markup() ) );
     		return;
     	}
 
