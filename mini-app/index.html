@@ -69,9 +69,30 @@ body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;bac
    $('continueBtn').textContent=screen==='merchant_verification'?'Start verification':'Open workspace';show('continueBtn');
   }catch(e){fail('Could not load your workspace.');}
  }
- $('continueBtn').addEventListener('click',function(){
-  if(tg.MainButton){tg.MainButton.setText('Continue');tg.MainButton.show();} 
- });
+ async function openWorkspace(){
+  try{
+   status('Loading your workspace…');
+   var url=REST+'listings';
+   if(ctx.role==='merchant'&&ctx.merchant_id){url+='?merchant_id='+ctx.merchant_id+'&per_page=20';}
+   else{url+='?per_page=8';}
+   var r=await fetch(url,{headers:{Authorization:'Bearer '+token}});var j=await r.json();
+   if(!j.success){fail((j.error&&j.error.message)||'Could not load the workspace.');return}
+   var items=j.data||[];
+   var heading=ctx.role==='merchant'?'Your listings':'Latest on Trade';
+   var html='';
+   if(!items.length){html='<div class="muted">No listings yet.'+(ctx.role==='merchant'?' Add one via the chat, then publish here.':' Check back soon.')+'</div>';}
+   else{
+    for(var i=0;i<items.length;i++){var it=items[i];
+     html+='<div class="card"><div class="hero" style="font-size:15px">'+esc(it.product&&it.product.canonical_name||('Listing #'+it.id))+'</div>'
+      +'<span class="pill">'+esc(it.price)+' '+esc(it.currency||'ETB')+'</span>'
+      +(it.status?' <span class="pill">'+esc(it.status)+'</span>':'')+'</div>';
+    }
+   }
+   $('resultsHead').textContent=heading; $('resultsMeta').textContent=items.length+' shown'; $('results').innerHTML=html;
+   status('Ready'); show('resultsCard');
+  }catch(e){fail('Could not open the workspace.');}
+ }
+ $('continueBtn').addEventListener('click',function(){ openWorkspace(); });
  openApp();
 })();
 </script>
