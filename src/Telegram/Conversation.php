@@ -121,11 +121,12 @@ final class Conversation {
     	}
 
     	// 3b. Anchored controls: change language / change role / back to home.
-    	if ( in_array( $input, array( '🌐 Language', '/language' ), true ) ) {
+    	//     (inline callback buttons — 'ctl:...' — arrive from the per-reply anchor markup.)
+    	if ( 'ctl:language' === $input || in_array( $input, array( '🌐 Language', '/language' ), true ) ) {
     		self::send_language_menu( $chat_id, $bot, $store );
     		return;
     	}
-    	if ( in_array( $input, array( '🔄 Change role', '/role' ), true ) ) {
+    	if ( 'ctl:role' === $input || in_array( $input, array( '🔄 Change role', '/role' ), true ) ) {
     		$bot->sendMessage( $chat_id, 'Choose a role:', array( 'reply_markup' => self::role_inline_markup() ) );
     		return;
     	}
@@ -163,7 +164,7 @@ final class Conversation {
     		$history[]      = array( 'role' => 'assistant', 'content' => $reply );
     		$data['history'] = array_slice( $history, -8 );
     		self::save_state( $store, $user_id, 'main', $data );
-    		$bot->sendMessage( $chat_id, $reply, array( 'reply_markup' => self::app_markup() ) );
+    		$bot->sendMessage( $chat_id, $reply, array( 'reply_markup' => self::ai_anchor_markup() ) );
     		return;
     	}
     }
@@ -538,6 +539,25 @@ final class Conversation {
 						'text'    => '🚀 Open Mini App',
 						'web_app' => array( 'url' => self::mini_app_url( $params ) ),
 					),
+				),
+			),
+		);
+	}
+
+	/**
+	 * Inline anchor carried on every AI reply: change language / role + Mini App handoff.
+	 * Inline buttons are the only way to keep the controls visible on older chats that
+	 * never received the anchored reply keyboard.
+	 */
+	private static function ai_anchor_markup(): array {
+		return array(
+			'inline_keyboard' => array(
+				array(
+					array( 'text' => '🌐 Language', 'callback_data' => 'ctl:language' ),
+					array( 'text' => '🔄 Change role', 'callback_data' => 'ctl:role' ),
+				),
+				array(
+					array( 'text' => '🚀 Open Mini App', 'web_app' => array( 'url' => self::mini_app_url() ) ),
 				),
 			),
 		);
