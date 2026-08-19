@@ -120,13 +120,12 @@ final class Conversation {
     		return;
     	}
 
-    	// 3b. Anchored controls: change language / change role / back to home.
-    	//     (inline callback buttons — 'ctl:...' — arrive from the per-reply anchor markup.)
-    	if ( 'ctl:language' === $input || in_array( $input, array( '🌐 Language', '/language' ), true ) ) {
+    	// 3b. Anchored controls (reply keyboard below the input): change language / change role / home.
+    	if ( in_array( $input, array( '🌐 Language', '/language' ), true ) ) {
     		self::send_language_menu( $chat_id, $bot, $store );
     		return;
     	}
-    	if ( 'ctl:role' === $input || in_array( $input, array( '🔄 Change role', '/role' ), true ) ) {
+    	if ( in_array( $input, array( '🔄 Change role', '/role' ), true ) ) {
     		$bot->sendMessage( $chat_id, 'Choose a role:', array( 'reply_markup' => self::role_inline_markup() ) );
     		return;
     	}
@@ -164,7 +163,9 @@ final class Conversation {
     		$history[]      = array( 'role' => 'assistant', 'content' => $reply );
     		$data['history'] = array_slice( $history, -8 );
     		self::save_state( $store, $user_id, 'main', $data );
-    		$bot->sendMessage( $chat_id, $reply, array( 'reply_markup' => self::ai_anchor_markup() ) );
+    		// Anchored reply keyboard below the input — the only controls; re-pinned so it
+    		// also appears for chats that onboarded before the bar shipped.
+    		$bot->sendMessage( $chat_id, $reply, array( 'reply_markup' => self::anchor_markup() ) );
     		return;
     	}
     }
@@ -542,22 +543,6 @@ final class Conversation {
 						'text'    => '🚀 Open Mini App',
 						'web_app' => array( 'url' => self::mini_app_url( $params ) ),
 					),
-				),
-			),
-		);
-	}
-
-	/**
-	 * Inline anchor carried on every AI reply: change language / role only. The Mini App
-	 * handoff lives in the anchored reply keyboard (anchor_markup) so it is not pushed
-	 * prematurely on every message.
-	 */
-	private static function ai_anchor_markup(): array {
-		return array(
-			'inline_keyboard' => array(
-				array(
-					array( 'text' => '🌐 Language', 'callback_data' => 'ctl:language' ),
-					array( 'text' => '🔄 Change role', 'callback_data' => 'ctl:role' ),
 				),
 			),
 		);

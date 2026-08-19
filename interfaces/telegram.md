@@ -12,13 +12,12 @@
 > No provider configured → a friendly fallback reply, still with the button. Provider/keys come from
 > the admin Settings page (`trade_ai_provider`, `trade_ai_openrouter_key/model`, `trade_ai_groq_key/model`).
 >
-> **Anchored controls:** completing role selection attaches an anchored reply keyboard — 🌐 Language,
-> 🔄 Change role, 🏠 Home — with the **🚀 Open Mini App** web_app button on its own row (handoff is
-> not pushed on every message). Every AI sell-agent reply carries **inline** anchor buttons
-> (`ctl:language` / `ctl:role`) so the controls stay reachable even for chats that onboarded before
-> the reply keyboard shipped. Changing language keeps the role and vice versa; `lang:`/`role:`
-> callbacks from an onboarded chat re-confirm the single field and stay in state `completed` instead
-> of restarting onboarding.
+> **Anchored controls:** the only controls are the anchored reply keyboard below the input —
+> 🌐 Language, 🔄 Change role, 🏠 Home, and **🚀 Open Mini App** (web_app) on its own row. It attaches
+> at role selection and is re-pinned on every AI sell-agent reply (so chats that onboarded before the
+> bar shipped still get it). No buttons are attached to messages themselves. Changing language keeps
+> the role and vice versa; `lang:`/`role:` callbacks from an onboarded chat re-confirm the single
+> field and stay in state `completed` instead of restarting onboarding.
 
 ## Public REST API
 | Method | Path | Params / Body | Returns | Auth | Errors |
