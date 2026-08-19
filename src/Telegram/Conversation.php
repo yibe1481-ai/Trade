@@ -468,7 +468,10 @@ final class Conversation {
 	/** Anchored reply keyboard: change language / role anytime. */
 	private static function anchor_markup(): array {
 		return array(
-			'keyboard'          => array( array( array( 'text' => '🌐 Language' ), array( 'text' => '🔄 Change role' ), array( 'text' => '🏠 Home' ) ) ),
+			'keyboard'          => array(
+				array( array( 'text' => '🌐 Language' ), array( 'text' => '🔄 Change role' ), array( 'text' => '🏠 Home' ) ),
+				array( array( 'text' => '🚀 Open Mini App', 'web_app' => array( 'url' => self::mini_app_url() ) ) ),
+			),
 			'resize_keyboard'   => true,
 			'one_time_keyboard' => false,
 		);
@@ -545,9 +548,9 @@ final class Conversation {
 	}
 
 	/**
-	 * Inline anchor carried on every AI reply: change language / role + Mini App handoff.
-	 * Inline buttons are the only way to keep the controls visible on older chats that
-	 * never received the anchored reply keyboard.
+	 * Inline anchor carried on every AI reply: change language / role only. The Mini App
+	 * handoff lives in the anchored reply keyboard (anchor_markup) so it is not pushed
+	 * prematurely on every message.
 	 */
 	private static function ai_anchor_markup(): array {
 		return array(
@@ -555,9 +558,6 @@ final class Conversation {
 				array(
 					array( 'text' => '🌐 Language', 'callback_data' => 'ctl:language' ),
 					array( 'text' => '🔄 Change role', 'callback_data' => 'ctl:role' ),
-				),
-				array(
-					array( 'text' => '🚀 Open Mini App', 'web_app' => array( 'url' => self::mini_app_url() ) ),
 				),
 			),
 		);

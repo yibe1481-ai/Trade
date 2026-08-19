@@ -13,11 +13,12 @@
 > the admin Settings page (`trade_ai_provider`, `trade_ai_openrouter_key/model`, `trade_ai_groq_key/model`).
 >
 > **Anchored controls:** completing role selection attaches an anchored reply keyboard — 🌐 Language,
-> 🔄 Change role, 🏠 Home (or `/language`, `/role`, `/home`). Every AI sell-agent reply also carries
-> **inline** anchor buttons (`ctl:language` / `ctl:role`) plus the Open Mini App button, so the
-> controls stay reachable even for chats that onboarded before the reply keyboard shipped. Changing
-> language keeps the role and vice versa; `lang:`/`role:` callbacks from an onboarded chat re-confirm
-> the single field and stay in state `completed` instead of restarting onboarding.
+> 🔄 Change role, 🏠 Home — with the **🚀 Open Mini App** web_app button on its own row (handoff is
+> not pushed on every message). Every AI sell-agent reply carries **inline** anchor buttons
+> (`ctl:language` / `ctl:role`) so the controls stay reachable even for chats that onboarded before
+> the reply keyboard shipped. Changing language keeps the role and vice versa; `lang:`/`role:`
+> callbacks from an onboarded chat re-confirm the single field and stay in state `completed` instead
+> of restarting onboarding.
 
 ## Public REST API
 | Method | Path | Params / Body | Returns | Auth | Errors |
