@@ -65,10 +65,15 @@ final class Conversation {
     		$lang             = str_replace( 'lang:', '', $input ); // 'en' or 'am'
     		$data['language'] = $lang;
 
-    		// Returning user changing language only — keep role, stay onboarded.
+    		// Returning user changing language only — keep role, stay onboarded, keep talking.
     		if ( ! empty( $data['role'] ?? '' ) ) {
     			self::save_state( $store, $user_id, 'completed', $data );
     			$confirm = ( 'am' === $lang ) ? "🌐 ቋንቋ ተመርጧል: አማርኛ" : "🌐 Language set to: English";
+    			if ( 'buyer' === ( $data['role'] ?? '' ) ) {
+    				$confirm .= ( 'am' === $lang )
+    					? "\n\nምን እየፈለጉ ነው? ንግግሩን እንቀጥል — ለመርዳት ተዘጋጅቻለሁ።"
+    					: "\n\nI'm your sell-agent — what are you looking for? I'll find it for you.";
+    			}
     			if ( null !== $message_id && $message_id > 0 ) {
     				$bot->editMessageText( $chat_id, $message_id, $confirm );
     			} else {
