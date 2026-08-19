@@ -16,6 +16,14 @@
 > `category`/`location`/`budget_max` params. No match → an honest "couldn't find" reply and no
 > button.
 >
+> **Seller flow (module 13):** role `seller` switches the AI to the listing persona (JSON
+> `slots: {item, price, category, location}`). Once item + price are captured the bot resolves the
+> seller's merchant via `tb_identity`→`tb_merchants`, matches category (`tb_categories.slug`) and
+> city (`tb_locations.name_key`, normalized), creates the product + a **DRAFT** listing, and hands
+> off to the Mini App (`view=my_listings`). No merchant → setup prompt, no listing. A photo sent in
+> chat is downloaded (`Bot::getFile`) and attached to the latest DRAFT via
+> `Listings\Service::create_image`.
+>
 > **Anchored controls:** the only controls are the anchored reply keyboard below the input —
 > 🌐 Language, 🔄 Change role, 🏠 Home, and **🚀 Open Mini App** (web_app) on its own row. It attaches
 > at role selection and is re-pinned on every AI sell-agent reply (so chats that onboarded before the

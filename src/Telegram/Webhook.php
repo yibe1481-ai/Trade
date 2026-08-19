@@ -51,6 +51,14 @@ final class Webhook {
 				$from_id = (int) ( $update['message']['from']['id'] ?? 0 );
 				Conversation::step( $chat_id, $text, null, null, $from_id );
 				Audit::write( 'telegram.message', 'chat', (string) $chat_id, array(), array( 'text_len' => strlen( $text ) ), array(), 'telegram', (string) $chat_id, 'webhook' );
+			} elseif ( isset( $update['message']['chat']['id'], $update['message']['photo'] ) ) {
+				$chat_id = (int) $update['message']['chat']['id'];
+				$from_id = (int) ( $update['message']['from']['id'] ?? 0 );
+				$file_id = '';
+				foreach ( (array) $update['message']['photo'] as $p ) {
+					$file_id = (string) ( $p['file_id'] ?? '' ); // last photo size = largest
+				}
+				Conversation::photo( $chat_id, $file_id, null, null, $from_id );
 			} elseif ( isset( $update['callback_query'] ) ) {
 				$chat_id = (int) $update['callback_query']['message']['chat']['id'];
 				$text = (string) $update['callback_query']['data'];

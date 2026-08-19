@@ -45,6 +45,26 @@ final class Bot {
 		return $this->call( 'answerCallbackQuery', $params );
 	}
 
+	/** Resolve a file_id to its file_path via getFile. */
+	public function getFile( string $file_id ): array {
+		return $this->call( 'getFile', array( 'file_id' => $file_id ) );
+	}
+
+	/** Absolute download URL for a getFile result's file_path. */
+	public function file_url( string $file_path ): string {
+		$token = $this->token_set() ? $this->token : (string) get_option( 'trade_telegram_bot_token', '' );
+		return self::BASE . '/file/bot' . $token . '/' . $file_path;
+	}
+
+	/** Download a getFile file_path's bytes (raw body), or '' on failure. */
+	public function download_file( string $file_path ): string {
+		$resp = wp_remote_get( $this->file_url( $file_path ), array( 'timeout' => 30 ) );
+		if ( is_wp_error( $resp ) || 200 !== (int) wp_remote_retrieve_response_code( $resp ) ) {
+			return '';
+		}
+		return (string) wp_remote_retrieve_body( $resp );
+	}
+
 	/**
 	 * Safe admin diagnostics. Never returns the bot token.
 	 * A sendMessage test is optional and only uses the supplied administrator chat ID.

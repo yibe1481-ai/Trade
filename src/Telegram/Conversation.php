@@ -153,48 +153,232 @@ final class Conversation {
     		return;
     	}
 
-    	// 7. Post-onboarding: AI sell-agent converses, keeps a short thread. Once it has
-    	//    structured the query (category identified) and listings actually match, the
-    	//    Open Mini App handoff button is sent with the filters as URL params. No match
-    	//    → no button, an honest "not found" reply instead.
+    	// 7. Post-onboarding: AI sell-agent converses, keeps a short thread.
+    	//    Buyer: structured query → handoff button only when listings actually match.
+    	//    Seller: captured item + price → create a DRAFT listing, then Mini App to manage.
     	if ( in_array( $current_step, array( 'main', 'completed' ), true ) && '' !== trim( $input ) && $bot->token_set() ) {
     		$history   = (array) ( $data['history'] ?? array() );
     		$history[] = array( 'role' => 'user', 'content' => $input );
-    		$reply     = AIService::chat( $history );
+    		$role      = (string) ( $data['role'] ?? '' );
+    		$reply     = AIService::chat( $history, null, null, 'seller' === $role ? 'seller' : 'buyer' );
     		$reply     = is_string( $reply ) ? array( 'reply' => $reply, 'slots' => array() ) : $reply;
     		$slots     = is_array( $reply['slots'] ?? null ) ? $reply['slots'] : array();
-    		$category  = trim( (string) ( $slots['category'] ?? '' ) );
 
     		$markup = self::anchor_markup();
-    		if ( '' !== $category ) {
-    			$location = trim( (string) ( $slots['location'] ?? '' ) );
-    			$budget   = max( 0, (int) ( $slots['budget_max'] ?? 0 ) );
-    			$q        = trim( $category . ' ' . $location );
-    			$filters  = $budget > 0 ? array( 'price_max' => $budget ) : array();
-    			$matches  = \Trade\Search\Service::search_listings( $q, $filters );
-    			if ( count( $matches ) > 0 ) {
-    				$params = array_filter( array(
-    					'category'   => $category,
-    					'location'   => $location,
-    					'budget_max' => $budget > 0 ? $budget : null,
-    				) );
-    				$markup = array( 'inline_keyboard' => array(
-    					array( array(
-    						'text'    => '🚀 Open Mini App',
-    						'web_app' => array( 'url' => self::mini_app_url( http_build_query( $params ) ) ),
-    					) ),
-    				) );
-    			} else {
-    				$reply['reply'] = "I couldn't find a match for {$category}" . ( $budget > 0 ? " under {$budget} ETB" : '' ) . " right now. Try a different item or budget, and I'll keep looking.";
+
+    		if ( 'seller' === $role ) {
+    			$out        = self::seller_step( $slots, $store, $user_id );
+    			$reply_text = $out['text'];
+    			$markup     = $out['markup'];
+    		} else {
+    			$category = trim( (string) ( $slots['category'] ?? '' ) );
+    			if ( '' !== $category ) {
+    				$location = trim( (string) ( $slots['location'] ?? '' ) );
+    				$budget   = max( 0, (int) ( $slots['budget_max'] ?? 0 ) );
+    				$q        = trim( $category . ' ' . $location );
+    				$filters  = $budget > 0 ? array( 'price_max' => $budget ) : array();
+    				$matches  = \Trade\Search\Service::search_listings( $q, $filters );
+    				if ( count( $matches ) > 0 ) {
+    					$params = array_filter( array(
+    						'category'   => $category,
+    						'location'   => $location,
+    						'budget_max' => $budget > 0 ? $budget : null,
+    					) );
+    					$markup = self::app_button( self::mini_app_url( http_build_query( $params ) ) );
+    				} else {
+    					$reply['reply'] = "I couldn't find a match for {$category}" . ( $budget > 0 ? " under {$budget} ETB" : '' ) . " right now. Try a different item or budget, and I'll keep looking.";
+    				}
     			}
+    			$reply_text = is_string( $reply['reply'] ?? null ) ? $reply['reply'] : '';
     		}
 
-    		$reply_text      = is_string( $reply['reply'] ?? null ) ? $reply['reply'] : '';
     		$history[]       = array( 'role' => 'assistant', 'content' => $reply_text );
     		$data['history'] = array_slice( $history, -8 );
     		self::save_state( $store, $user_id, 'main', $data );
     		$bot->sendMessage( $chat_id, $reply_text, array( 'reply_markup' => $markup ) );
     		return;
+    	}
+    }
+
+    /** Seller branch of §7: turn captured {item, price, category, location} into a DRAFT listing. */
+    private static function seller_step( array $slots, Store $store, int $user_id ): array {
+    	$item  = trim( (string) ( $slots['item'] ?? '' ) );
+    	$price = max( 0, (int) ( $slots['price'] ?? 0 ) );
+
+    	if ( '' === $item || $price <= 0 ) {
+    		return array( 'text' => 'Tell me what you want to sell and the price — I’ll start the listing for you.', 'markup' => self::anchor_markup() );
+    	}
+
+    	$merchant_id = self::seller_merchant_id( $user_id, $store );
+    	if ( null === $merchant_id ) {
+    		return array(
+    			'text'   => 'You need a merchant workspace before listing — open the Mini App to set it up.',
+    			'markup' => self::app_button( self::mini_app_url( 'agent=seller' ) ),
+    		);
+    	}
+
+    	$category    = trim( (string) ( $slots['category'] ?? '' ) );
+    	$location    = trim( (string) ( $slots['location'] ?? '' ) );
+    	$category_id = '' !== $category ? self::resolve_category_id( $category, $store ) : null;
+    	$location_id = '' !== $location ? self::resolve_location_id( $location, $store ) : null;
+
+    	if ( null === $category_id || null === $location_id ) {
+    		return array(
+    			'text'   => "Almost there — pick a category and city for \"{$item}\".\n\nCategories: " . self::name_list( 'tb_categories', 'slug', $store ) . "\nCities: " . self::name_list( 'tb_locations', 'name_key', $store ),
+    			'markup' => self::anchor_markup(),
+    		);
+    	}
+
+    	$product = \Trade\Catalog\Service::create_product( array(
+    		'category_id'     => $category_id,
+    		'canonical_name'  => $item,
+    		'attributes_json' => self::default_attributes( $category_id, $store ),
+    	), $merchant_id, $store );
+    	$listing = \Trade\Listings\Service::create_listing( array(
+    		'product_id'  => (int) ( $product['id'] ?? 0 ),
+    		'price'       => $price,
+    		'currency'    => 'ETB',
+    		'location_id' => $location_id,
+    	), $merchant_id, $store );
+
+    	return array(
+    		'text'   => "✅ Draft added: {$item} — {$price} ETB.\n\nOpen the Mini App to add photos, review, and publish.",
+    		'markup' => self::app_button( self::mini_app_url( 'view=my_listings&listing_id=' . (int) ( $listing['id'] ?? 0 ) ) ),
+    	);
+    }
+
+    private static function app_button( string $url ): array {
+    	return array( 'inline_keyboard' => array( array( array( 'text' => '🚀 Open Mini App', 'web_app' => array( 'url' => $url ) ) ) ) );
+    }
+
+    /** The seller's merchant id (via tb_identity → wp_user_id → tb_merchants), or null. */
+    private static function seller_merchant_id( int $user_id, Store $store ): ?int {
+    	$identity = $store->get_row( 'tb_identity', 'telegram_user_id = %s', array( (string) $user_id ) );
+    	if ( ! is_array( $identity ) ) {
+    		return null;
+    	}
+    	$wp_user_id = (int) ( $identity['wp_user_id'] ?? 0 );
+    	foreach ( $store->get_rows( 'tb_merchants', '1=1' ) as $row ) {
+    		if ( (int) ( $row['wp_user_id'] ?? 0 ) === $wp_user_id ) {
+    			return (int) ( $row['id'] ?? 0 );
+    		}
+    	}
+    	return null;
+    }
+
+    private static function resolve_category_id( string $name, Store $store ): ?int {
+    	$name = self::norm_name( $name );
+    	foreach ( $store->get_rows( 'tb_categories', '1=1' ) as $row ) {
+    		$slug  = self::norm_name( (string) ( $row['slug'] ?? '' ) );
+    		$nkey  = self::norm_name( (string) ( $row['name_key'] ?? '' ) );
+    		if ( ( '' !== $slug && str_contains( $slug, $name ) ) || ( '' !== $nkey && str_contains( $nkey, $name ) ) ) {
+    			return (int) ( $row['id'] ?? 0 );
+    		}
+    	}
+    	return null;
+    }
+
+    private static function resolve_location_id( string $name, Store $store ): ?int {
+    	$name = self::norm_name( $name );
+    	foreach ( $store->get_rows( 'tb_locations', '1=1' ) as $row ) {
+    		$hay = self::norm_name( (string) ( $row['name_key'] ?? '' ) );
+    		if ( '' !== $hay && str_contains( $hay, $name ) ) {
+    			return (int) ( $row['id'] ?? 0 );
+    		}
+    	}
+    	return null;
+    }
+
+    /** Lowercase, strip spaces/underscores so 'addis ababa' matches name_key 'ADDIS_ABABA'. */
+    private static function norm_name( string $s ): string {
+    	$s = mb_strtolower( trim( $s ) );
+    	return preg_replace( '/[^a-z0-9]/', '', $s ) ?? $s;
+    }
+
+    /**
+     * Fill a category's attribute defs with defaults so the bot can create the product
+     * without a full attribute form; the seller refines the details in the Mini App.
+     * # ponytail: categories with zero defs can't be used this way (create_product
+     *   requires a non-empty assoc attributes map) — rare; covered by the Mini App flow.
+     */
+    private static function default_attributes( int $category_id, Store $store ): array {
+    	$attrs = array();
+    	foreach ( \Trade\Catalog\Service::get_category_attributes( $category_id, $store ) as $def ) {
+    		$key = (string) ( $def['key'] ?? '' );
+    		if ( '' === $key ) {
+    			continue;
+    		}
+    		$options = json_decode( (string) ( $def['options_json'] ?? '[]' ), true );
+    		if ( is_array( $options ) && $options ) {
+    			$attrs[ $key ] = $options[0];
+    			continue;
+    		}
+    		$type = strtolower( (string) ( $def['data_type'] ?? 'string' ) );
+    		if ( in_array( $type, array( 'int', 'integer', 'number' ), true ) ) {
+    			$attrs[ $key ] = 0;
+    		} elseif ( in_array( $type, array( 'bool', 'boolean' ), true ) ) {
+    			$attrs[ $key ] = false;
+    		} else {
+    			$attrs[ $key ] = '';
+    		}
+    	}
+    	return $attrs;
+    }
+
+    private static function name_list( string $table, string $col, Store $store ): string {
+    	$names = array();
+    	foreach ( array_slice( $store->get_rows( $table, '1=1' ), 0, 8 ) as $row ) {
+    		$v = trim( (string) ( $row[ $col ] ?? '' ) );
+    		if ( '' !== $v ) {
+    			$names[] = $v;
+    		}
+    	}
+    	return $names ? implode( ', ', $names ) : '—';
+    }
+
+    /**
+     * A photo from a seller: download it and attach to their latest DRAFT listing.
+     * Silently no-ops for non-sellers or when nothing can be downloaded.
+     */
+    public static function photo( int $chat_id, string $file_id, ?Store $store = null, ?Bot $bot = null, ?int $from_id = null ): void {
+    	$store     = $store ?? Store::default();
+    	$bot       = $bot ?? new Bot();
+    	$user_id   = $from_id ?? $chat_id;
+    	$merchant  = self::seller_merchant_id( $user_id, $store );
+    	if ( null === $merchant || ! $bot->token_set() || '' === $file_id ) {
+    		return;
+    	}
+
+    	$draft = null;
+    	foreach ( $store->get_rows( 'tb_listings', '1=1' ) as $row ) {
+    		if ( (int) ( $row['merchant_id'] ?? 0 ) === $merchant && 'DRAFT' === (string) ( $row['status'] ?? '' ) && ( null === $draft || (int) ( $row['id'] ?? 0 ) > (int) ( $draft['id'] ?? 0 ) ) ) {
+    			$draft = $row;
+    		}
+    	}
+    	if ( null === $draft ) {
+    		$bot->sendMessage( $chat_id, "Finish adding your item first — tell me what you're selling and the price, then send the photo." );
+    		return;
+    	}
+
+    	try {
+    		$file      = $bot->getFile( $file_id );
+    		$file_path = (string) ( $file['result']['file_path'] ?? '' );
+    		$bytes     = '' !== $file_path ? $bot->download_file( $file_path ) : '';
+    		if ( '' === $bytes ) {
+    			return;
+    		}
+    		$storage_key = bin2hex( random_bytes( 16 ) );
+    		$dirs        = function_exists( 'wp_upload_dir' ) ? (array) wp_upload_dir() : array( 'basedir' => ABSPATH . 'wp-content/uploads' );
+    		$target      = rtrim( (string) ( $dirs['basedir'] ?? ABSPATH . 'wp-content/uploads' ), '/' ) . '/trade-media';
+    		if ( ! is_dir( $target ) ) {
+    			@mkdir( $target, 0755, true );
+    		}
+    		@file_put_contents( $target . '/' . $storage_key, $bytes );
+
+    		\Trade\Listings\Service::create_image( (int) $draft['id'], $storage_key, $merchant, $store );
+    		$bot->sendMessage( $chat_id, '📸 Photo attached to your draft. Open the Mini App to review.' );
+    	} catch ( \Throwable $e ) {
+    		// # ponytail: swallow image failures — never 500 the webhook over a photo.
     	}
     }
     

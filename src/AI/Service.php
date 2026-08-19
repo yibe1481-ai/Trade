@@ -90,6 +90,17 @@ Reply with ONLY a JSON object and nothing else, in this exact shape:
 Fill "slots" only for what the buyer has told you; leave the rest empty (category can also stay empty while you are still asking).
 TXT;
 
+	/** Seller persona — captures what the seller wants to list, for a chat-driven draft. */
+	private const SELLER_AGENT_PROMPT = <<<TXT
+You are the listing assistant for the Trade marketplace in Ethiopia, helping a seller add a listing through chat.
+Ask ONE short, friendly question at a time until you have the item they want to sell, its price in ETB, and the city. Category is optional — infer it from the item if you can.
+Once you have the item and price, confirm: "Draft ready — open the Mini App to add photos and publish."
+Never invent prices, stock, or listings.
+Reply with ONLY a JSON object and nothing else, in this exact shape:
+{"reply":"<your message to the seller, 1-3 short sentences>","slots":{"item":"<what they are selling, or \"\">","price":<number in ETB or 0>,"category":"<category, or \"\">","location":"<city, or \"\">"}}
+Fill "slots" only for what the seller has told you; leave the rest empty (item can stay empty while you are still asking).
+TXT;
+
 	/** Resolve the active provider config from admin options. Never exposes the key by default. */
 	public static function config(): array {
 		$provider = (string) get_option( 'trade_ai_provider', '' );
@@ -149,21 +160,24 @@ TXT;
 	 *         structured query slots the agent extracted (category/location/budget_max).
 	 *         Falls back gracefully when no provider is configured or the call fails.
 	 */
-	public static function chat( array $history, ?Store $store = null, ?callable $http = null ): array {
+	public static function chat( array $history, ?Store $store = null, ?callable $http = null, string $persona = 'buyer' ): array {
 		$last = is_array( $history ) ? (string) ( $history[ count( $history ) - 1 ]['content'] ?? '' ) : '';
 		Audit::write( 'ai.chat', 'ai', 'assistant', array(), array(), array( 'prompt_len' => strlen( $last ) ), 'system', '0', 'telegram' );
 
 		$cfg = self::config();
 		if ( ! ( $cfg['configured'] ?? false ) ) {
-			return array( 'reply' => "I'm the Trade sell-agent — I can help you find anything. Tell me what you're looking for (item, budget, city), or open the Mini App to browse.", 'slots' => array() );
+			return array( 'reply' => 'seller' === $persona
+				? "I'm the Trade listing assistant — tell me what you want to sell, the price, and your city, and I'll start a listing draft."
+				: "I'm the Trade sell-agent — I can help you find anything. Tell me what you're looking for (item, budget, city), or open the Mini App to browse.", 'slots' => array() );
 		}
 
 		$cost = self::estimateCost( 'chat', array( 'text' => $last ) );
 		if ( $cost > self::BUDGET_CEILING ) {
-			return array( 'reply' => 'Your AI budget for today is used up. Open the Mini App to keep going without AI.', 'slots' => array() );
+			return array( 'reply' => 'Your AI budget for this is used up. Open the Mini App to continue without AI.', 'slots' => array() );
 		}
 
-		$messages = array_merge( array( array( 'role' => 'system', 'content' => self::SELL_AGENT_PROMPT ) ), $history );
+		$prompt   = 'seller' === $persona ? self::SELLER_AGENT_PROMPT : self::SELL_AGENT_PROMPT;
+		$messages = array_merge( array( array( 'role' => 'system', 'content' => $prompt ) ), $history );
 		$raw      = self::complete( $messages, $http );
 		if ( '' === $raw ) {
 			return array( 'reply' => "Sorry, I couldn't reach the AI right now. Try again, or open the Mini App to browse.", 'slots' => array() );
