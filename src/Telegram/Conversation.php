@@ -153,19 +153,47 @@ final class Conversation {
     		return;
     	}
 
-    	// 7. Post-onboarding: AI sell-agent converses, keeps a short thread, and always
-    	//    offers the Open Mini App handoff button. Falls back to a graceful message if
-    	//    no AI provider is configured in Settings.
+    	// 7. Post-onboarding: AI sell-agent converses, keeps a short thread. Once it has
+    	//    structured the query (category identified) and listings actually match, the
+    	//    Open Mini App handoff button is sent with the filters as URL params. No match
+    	//    → no button, an honest "not found" reply instead.
     	if ( in_array( $current_step, array( 'main', 'completed' ), true ) && '' !== trim( $input ) && $bot->token_set() ) {
-    		$history        = (array) ( $data['history'] ?? array() );
-    		$history[]      = array( 'role' => 'user', 'content' => $input );
-    		$reply          = AIService::chat( $history );
-    		$history[]      = array( 'role' => 'assistant', 'content' => $reply );
+    		$history   = (array) ( $data['history'] ?? array() );
+    		$history[] = array( 'role' => 'user', 'content' => $input );
+    		$reply     = AIService::chat( $history );
+    		$reply     = is_string( $reply ) ? array( 'reply' => $reply, 'slots' => array() ) : $reply;
+    		$slots     = is_array( $reply['slots'] ?? null ) ? $reply['slots'] : array();
+    		$category  = trim( (string) ( $slots['category'] ?? '' ) );
+
+    		$markup = self::anchor_markup();
+    		if ( '' !== $category ) {
+    			$location = trim( (string) ( $slots['location'] ?? '' ) );
+    			$budget   = max( 0, (int) ( $slots['budget_max'] ?? 0 ) );
+    			$q        = trim( $category . ' ' . $location );
+    			$filters  = $budget > 0 ? array( 'price_max' => $budget ) : array();
+    			$matches  = \Trade\Search\Service::search_listings( $q, $filters );
+    			if ( count( $matches ) > 0 ) {
+    				$params = array_filter( array(
+    					'category'   => $category,
+    					'location'   => $location,
+    					'budget_max' => $budget > 0 ? $budget : null,
+    				) );
+    				$markup = array( 'inline_keyboard' => array(
+    					array( array(
+    						'text'    => '🚀 Open Mini App',
+    						'web_app' => array( 'url' => self::mini_app_url( http_build_query( $params ) ) ),
+    					) ),
+    				) );
+    			} else {
+    				$reply['reply'] = "I couldn't find a match for {$category}" . ( $budget > 0 ? " under {$budget} ETB" : '' ) . " right now. Try a different item or budget, and I'll keep looking.";
+    			}
+    		}
+
+    		$reply_text      = is_string( $reply['reply'] ?? null ) ? $reply['reply'] : '';
+    		$history[]       = array( 'role' => 'assistant', 'content' => $reply_text );
     		$data['history'] = array_slice( $history, -8 );
     		self::save_state( $store, $user_id, 'main', $data );
-    		// Anchored reply keyboard below the input — the only controls; re-pinned so it
-    		// also appears for chats that onboarded before the bar shipped.
-    		$bot->sendMessage( $chat_id, $reply, array( 'reply_markup' => self::anchor_markup() ) );
+    		$bot->sendMessage( $chat_id, $reply_text, array( 'reply_markup' => $markup ) );
     		return;
     	}
     }

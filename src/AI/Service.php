@@ -79,12 +79,15 @@ final class Service {
 		),
 	);
 
-	/** Sell-agent system prompt — guides a buyer to the Mini App handoff. */
+	/** Sell-agent system prompt — drives the buyer to a structured Mini App handoff. */
 	private const SELL_AGENT_PROMPT = <<<TXT
 You are the sales agent for the Trade marketplace in Ethiopia.
-Help the buyer conversationally identify what they want: item or service, budget (ETB), and city. Ask ONE short question at a time until you have enough. Keep replies to 1-3 short sentences.
-Once you know enough, say briefly what they are looking for and invite them: "Open the Mini App to see what's available."
+Help the buyer conversationally identify what they want: item or service, budget (ETB), and city. Ask ONE short, friendly question at a time until you know the item. Budget and city are optional extras — take them if offered, do not block on them.
+Once you know the item, briefly confirm what they are looking for and invite them: "Open the Mini App to see what's available."
 You can also help a seller describe what they sell. Never invent listings, prices, or stock.
+Reply with ONLY a JSON object and nothing else, in this exact shape:
+{"reply":"<your message to the buyer, 1-3 short sentences>","slots":{"category":"<item/service, or \"\">","location":"<city, or \"\">","budget_max":<number in ETB or 0>}}
+Fill "slots" only for what the buyer has told you; leave the rest empty (category can also stay empty while you are still asking).
 TXT;
 
 	/** Resolve the active provider config from admin options. Never exposes the key by default. */
@@ -141,26 +144,54 @@ TXT;
 	/**
 	 * Conversational sell-agent reply for the Telegram assistant (§§81, 121).
 	 * $history is [{role,content}] of prior turns (system prompt is added here).
-	 * Always returns a string; falls back gracefully when no provider is configured.
-	 * Never mutates marketplace tables, always audit-logged.
+	 *
+	 * @return array{reply:string, slots:array<string,mixed>} — the buyer-facing text and any
+	 *         structured query slots the agent extracted (category/location/budget_max).
+	 *         Falls back gracefully when no provider is configured or the call fails.
 	 */
-	public static function chat( array $history, ?Store $store = null, ?callable $http = null ): string {
+	public static function chat( array $history, ?Store $store = null, ?callable $http = null ): array {
 		$last = is_array( $history ) ? (string) ( $history[ count( $history ) - 1 ]['content'] ?? '' ) : '';
 		Audit::write( 'ai.chat', 'ai', 'assistant', array(), array(), array( 'prompt_len' => strlen( $last ) ), 'system', '0', 'telegram' );
 
 		$cfg = self::config();
 		if ( ! ( $cfg['configured'] ?? false ) ) {
-			return "I'm the Trade sell-agent — I can help you find or sell anything. Tell me what you're looking for (item, budget, city), or open the Mini App to browse.";
+			return array( 'reply' => "I'm the Trade sell-agent — I can help you find anything. Tell me what you're looking for (item, budget, city), or open the Mini App to browse.", 'slots' => array() );
 		}
 
 		$cost = self::estimateCost( 'chat', array( 'text' => $last ) );
 		if ( $cost > self::BUDGET_CEILING ) {
-			return "Your AI budget for today is used up. Open the Mini App to keep going without AI.";
+			return array( 'reply' => 'Your AI budget for today is used up. Open the Mini App to keep going without AI.', 'slots' => array() );
 		}
 
 		$messages = array_merge( array( array( 'role' => 'system', 'content' => self::SELL_AGENT_PROMPT ) ), $history );
-		$reply    = self::complete( $messages, $http );
-		return '' !== $reply ? $reply : "Sorry, I couldn't reach the AI right now. Try again, or open the Mini App to browse.";
+		$raw      = self::complete( $messages, $http );
+		if ( '' === $raw ) {
+			return array( 'reply' => "Sorry, I couldn't reach the AI right now. Try again, or open the Mini App to browse.", 'slots' => array() );
+		}
+		return self::parse_reply( $raw );
+	}
+
+	/**
+	 * Tolerant JSON envelope parser for the sell-agent reply.
+	 * Extracts {"reply":…,"slots":…} anywhere in the text; on any failure treats the
+	 * whole response as the reply with no slots.
+	 *
+	 * @return array{ reply: string, slots: array<string,mixed> }
+	 */
+	public static function parse_reply( string $raw ): array {
+		$open  = strpos( $raw, '{' );
+		$close = strrpos( $raw, '}' );
+		if ( false === $open || false === $close || $close <= $open ) {
+			return array( 'reply' => trim( $raw ), 'slots' => array() );
+		}
+		$json = json_decode( substr( $raw, $open, $close - $open + 1 ), true );
+		if ( ! is_array( $json ) ) {
+			return array( 'reply' => trim( $raw ), 'slots' => array() );
+		}
+		$reply = trim( (string) ( $json['reply'] ?? $raw ) );
+		$slots = is_array( $json['slots'] ?? null ) ? $json['slots'] : array();
+		$slots = array_filter( $slots, static fn( $v ) => is_string( $v ) || is_int( $v ) || is_float( $v ) );
+		return array( 'reply' => '' !== $reply ? $reply : trim( $raw ), 'slots' => $slots );
 	}
 
 	/** Estimate cost for a task. */

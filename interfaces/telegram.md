@@ -8,9 +8,13 @@
 > message gets a one-time greeting (never the language menu); a chat stuck mid-onboarding
 > (`awaiting_role`) is nudged back to role selection. Post-onboarding text (state `main`/`completed`)
 > goes to the **AI sell-agent** (`AI\Service::chat`) with the last 8 turns of thread memory stored in
-> the chat row's `data.history`; every reply carries an **Open Mini App** web_app button for handoff.
-> No provider configured → a friendly fallback reply, still with the button. Provider/keys come from
-> the admin Settings page (`trade_ai_provider`, `trade_ai_openrouter_key/model`, `trade_ai_groq_key/model`).
+> the chat row's `data.history`; no provider configured → a graceful fallback reply. Mini App
+> handoff: once the sell-agent structures the query (`chat` returns a JSON `{reply, slots}`
+> envelope), `Conversation::step` §7 runs
+> `Search\Service::search_listings` with the extracted filters; only when matches exist does the
+> reply carry the **Open Mini App** inline button whose `web_app.url` includes the
+> `category`/`location`/`budget_max` params. No match → an honest "couldn't find" reply and no
+> button.
 >
 > **Anchored controls:** the only controls are the anchored reply keyboard below the input —
 > 🌐 Language, 🔄 Change role, 🏠 Home, and **🚀 Open Mini App** (web_app) on its own row. It attaches

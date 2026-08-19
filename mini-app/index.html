@@ -13,6 +13,7 @@ body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;bac
 <div class="row"><div class="avatar" id="avatar">?</div><div><h1 id="name">Trade</h1><div class="muted" id="sub">Telegram Mini App</div></div></div>
 <div class="card" id="statusCard"><div class="muted" id="status">Signing in…</div><div id="err" class="hide err"></div></div>
 <div class="card hide" id="contextCard"><div class="hero" id="welcome"></div><div class="muted" id="details"></div><div id="verification"></div></div>
+<div class="card hide" id="resultsCard"><div class="hero" id="resultsHead"></div><div class="muted" id="resultsMeta"></div><div id="results"></div></div>
 <button class="hide" id="continueBtn">Continue</button>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script>
@@ -25,12 +26,35 @@ body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;bac
  document.documentElement.style.setProperty('--bg',tg.themeParams.bg_color||'#fff');document.documentElement.style.setProperty('--fg',tg.themeParams.text_color||'#222');document.documentElement.style.setProperty('--accent',tg.themeParams.button_color||'#2e6ff2');document.documentElement.style.setProperty('--muted',tg.themeParams.hint_color||'#707579');document.documentElement.style.setProperty('--card',tg.themeParams.secondary_bg_color||'#f4f4f5');
  var user=tg.initDataUnsafe&&tg.initDataUnsafe.user;
  if(user){$('name').textContent=(user.first_name||'')+(user.last_name?' '+user.last_name:'');$('avatar').textContent=(user.first_name||'?').charAt(0);$('sub').textContent='@'+(user.username||('tg '+user.id))}
+ var qp=new URLSearchParams(location.search), filters={category:(qp.get('category')||'').trim(),location:(qp.get('location')||'').trim(),budget_max:parseInt(qp.get('budget_max')||'0',10)||0};
  async function openApp(){
   try{
    var r=await fetch(REST+'auth/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:tg.initData})});
    var j=await r.json(); if(!j.success){fail((j.error&&j.error.message)||'Login failed');return}
-   token=j.data.session_token; ctx=j.data; await loadContext();
+   token=j.data.session_token; ctx=j.data;
+   if(filters.category){await loadResults();}else{await loadContext();}
   }catch(e){fail('Network error. Please try again.');}
+ }
+ function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+ function caps(s){s=String(s||'');return s.charAt(0).toUpperCase()+s.slice(1)}
+ async function loadResults(){
+  try{
+   status('Searching '+filters.category+'…');
+   var q=encodeURIComponent((filters.category+' '+(filters.location||'')).trim());
+   var url=REST+'search?q='+q+(filters.budget_max?('&price_max='+filters.budget_max):'');
+   var r=await fetch(url,{headers:{Authorization:'Bearer '+token}});var j=await r.json();
+   if(!j.success){fail((j.error&&j.error.message)||'Search failed.');return}
+   var items=(j.data||[]), meta=j.meta||{};
+   $('resultsHead').textContent=caps(filters.category);
+   var parts=[];
+   if(filters.location)parts.push('in '+filters.location);
+   if(filters.budget_max)parts.push('up to '+filters.budget_max+' ETB');
+   $('resultsMeta').textContent=(parts.length?parts.join(' ')+' · ':'')+meta.total+' item'+(meta.total===1?'':'s');
+   var html='';
+   if(meta.total===0){html='<div class="muted">No matching items yet. The bot will tell you when something fits.</div>';}
+   else{for(var i=0;i<items.length;i++){var it=items[i];html+='<div class="card"><div class="hero" style="font-size:15px">'+esc(it.product&&it.product.canonical_name||('Listing #'+it.id))+'</div><span class="pill">'+esc(it.price)+' '+esc(it.currency||'ETB')+'</span></div>';}}
+   $('results').innerHTML=html;status('Ready');show('resultsCard');
+  }catch(e){fail('Could not load search results.');}
  }
  async function loadContext(){
   try{
