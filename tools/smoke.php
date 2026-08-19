@@ -30,6 +30,21 @@ use Trade\Telegram\Conversation;
 
 // --- WP function stubs (only what the exercised code calls) -------------------------
 
+if ( ! function_exists( 'get_option' ) ) {
+	function get_option( string $key, $default = false ) {
+		return $default;
+	}
+}
+if ( ! function_exists( 'update_option' ) ) {
+	function update_option( string $key, $value, bool $autoload = true ) {
+		return true;
+	}
+}
+if ( ! function_exists( 'home_url' ) ) {
+	function home_url( string $path = '' ): string {
+		return 'https://trade.cleartools.net' . $path;
+	}
+}
 if ( ! function_exists( 'wp_json_encode' ) ) {
 	function wp_json_encode( $value, $flags = 0 ): string|false {
 		return json_encode( $value, $flags );

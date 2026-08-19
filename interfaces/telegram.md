@@ -1,7 +1,16 @@
 # Module: telegram
 **Purpose:** Bot adapter — webhook receiver, outbound messages, inline buttons, deep links. Phase 1 ships only the webhook receiver (secret validation + ack). Outbound send/edit/callback lands with module 3.
 **Status:** in_progress
-**Depends on:** core, identity, localization
+**Depends on:** core, identity, localization, ai
+
+> **Conversation (module 13):** `Conversation::step()` is the conversation-based gateway (returns
+> `void`, sends directly). Onboarding: `/start` → inline language → inline role; a plain first
+> message gets a one-time greeting (never the language menu); a chat stuck mid-onboarding
+> (`awaiting_role`) is nudged back to role selection. Post-onboarding text (state `main`/`completed`)
+> goes to the **AI sell-agent** (`AI\Service::chat`) with the last 8 turns of thread memory stored in
+> the chat row's `data.history`; every reply carries an **Open Mini App** web_app button for handoff.
+> No provider configured → a friendly fallback reply, still with the button. Provider/keys come from
+> the admin Settings page (`trade_ai_provider`, `trade_ai_openrouter_key/model`, `trade_ai_groq_key/model`).
 
 ## Public REST API
 | Method | Path | Params / Body | Returns | Auth | Errors |

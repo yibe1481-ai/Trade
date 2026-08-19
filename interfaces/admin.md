@@ -1,7 +1,15 @@
 # Module: admin
 **Purpose:** Trade Bot Control Center inside WordPress Admin.
-**Status:** not_started
+**Status:** in_progress
 **Depends on:** all stable modules
+
+> AI sell-agent configuration (module 13) lives on the existing **Trade → Settings** page
+> (`Admin\Service::render_settings`). Options: `trade_ai_provider` (`` | `openrouter` | `groq`),
+> `trade_ai_openrouter_key` / `trade_ai_openrouter_model`, `trade_ai_groq_key` / `trade_ai_groq_model`.
+> Keys are password fields and never echoed; `ai_status()` shows the resolved provider + model.
+> Providers are OpenAI-compatible chat endpoints; `Admin\Service::AI_PROVIDERS` lists the defaults
+> (`openai/gpt-4o-mini`, `llama-3.3-70b-versatile`). Full request shape lives in the AI gateway
+> (`AI\Service::config` / `complete`).
 
 ## Public REST API
 | Method | Path | Params / Body | Returns | Auth | Errors |

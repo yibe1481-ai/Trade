@@ -49,11 +49,17 @@ final class Webhook {
 				$chat_id = (int) $update['message']['chat']['id'];
 				$text = (string) $update['message']['text'];
 				$from_id = (int) ( $update['message']['from']['id'] ?? 0 );
-				$replies = Conversation::step( $chat_id, $text, null, null, $from_id );
-				Audit::write( 'telegram.message', 'chat', (string) $chat_id, array(), array( 'replies' => count( $replies ), 'text_len' => strlen( $text ) ), array(), 'telegram', (string) $chat_id, 'webhook' );
+				Conversation::step( $chat_id, $text, null, null, $from_id );
+				Audit::write( 'telegram.message', 'chat', (string) $chat_id, array(), array( 'text_len' => strlen( $text ) ), array(), 'telegram', (string) $chat_id, 'webhook' );
 			} elseif ( isset( $update['callback_query'] ) ) {
+				$chat_id = (int) $update['callback_query']['message']['chat']['id'];
+				$text = (string) $update['callback_query']['data'];
+				$from_id = (int) ( $update['callback_query']['from']['id'] ?? 0 );
+				$message_id = (int) ( $update['callback_query']['message']['message_id'] ?? 0 );
+				Conversation::step( $chat_id, $text, null, null, $from_id, $message_id );
+				
 				$bot = new Bot();
-				if ( $bot->token_set() ) $bot->answerCallbackQuery( (string) ( $update['callback_query']['id'] ?? '' ), 'Coming soon.' );
+				if ( $bot->token_set() ) $bot->answerCallbackQuery( (string) ( $update['callback_query']['id'] ?? '' ) );
 			}
 		} catch ( \Throwable $e ) {
 			$context = array(

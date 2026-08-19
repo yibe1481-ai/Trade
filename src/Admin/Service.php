@@ -21,6 +21,17 @@ final class Service {
 		'trade_telegram_webhook_secret' => 'Telegram webhook secret',
 		'trade_default_lang'         => 'Default language code',
 		'trade_mini_app_url'         => 'Mini App URL',
+		'trade_ai_provider'          => 'AI provider',
+		'trade_ai_openrouter_key'    => 'OpenRouter API key',
+		'trade_ai_openrouter_model'  => 'OpenRouter model',
+		'trade_ai_groq_key'          => 'Groq API key',
+		'trade_ai_groq_model'        => 'Groq model',
+	);
+
+	/** AI providers offered in Settings; value = OpenRouter-style default model. */
+	private const AI_PROVIDERS = array(
+		'openrouter' => array( 'label' => 'OpenRouter', 'default_model' => 'openai/gpt-4o-mini' ),
+		'groq'       => array( 'label' => 'Groq',       'default_model' => 'llama-3.3-70b-versatile' ),
 	);
 
 	public static function boot(): void {
@@ -94,6 +105,19 @@ final class Service {
 			}
 		}
 		return $info;
+	}
+
+	/** AI provider readiness for the Settings page (never echoes the key). */
+	private static function ai_status(): array {
+		if ( ! class_exists( '\Trade\AI\Service' ) || ! method_exists( '\Trade\AI\Service', 'config' ) ) {
+			return array( 'ready' => false, 'label' => 'AI module not loaded' );
+		}
+		$cfg = \Trade\AI\Service::config();
+		if ( ! ( $cfg['configured'] ?? false ) ) {
+			$label = '' !== ( $cfg['provider'] ?? '' ) ? ( $cfg['provider'] . ' — no key set' ) : 'No AI provider selected';
+			return array( 'ready' => false, 'label' => $label );
+		}
+		return array( 'ready' => true, 'label' => $cfg['provider'] . ' · ' . $cfg['model'] );
 	}
 
 	private static function count( string $table ): int {
@@ -399,7 +423,14 @@ final class Service {
 		foreach ( self::OPT_KEYS as $key => $label ) {
 			$val = (string) get_option( $key, '' );
 			echo '<tr><th scope="row"><label for="' . esc_attr( $key ) . '">' . esc_html( $label ) . '</label></th><td>';
-			if ( false !== strpos( $key, 'secret' ) || false !== strpos( $key, 'token' ) ) {
+			if ( 'trade_ai_provider' === $key ) {
+				echo '<select id="' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '">';
+				echo '<option value=""' . selected( $val, '', false ) . '>' . esc_html( '— AI off —' ) . '</option>';
+				foreach ( self::AI_PROVIDERS as $code => $meta ) {
+					echo '<option value="' . esc_attr( $code ) . '"' . selected( $val, $code, false ) . '>' . esc_html( $meta['label'] ) . ' (default: ' . esc_html( $meta['default_model'] ) . ')</option>';
+				}
+				echo '</select>';
+			} elseif ( false !== strpos( $key, '_key' ) || false !== strpos( $key, 'secret' ) || false !== strpos( $key, 'token' ) ) {
 				echo '<input type="password" class="regular-text" id="' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '" value="' . esc_attr( $val ) . '" autocomplete="off">';
 			} else {
 				echo '<input type="text" class="regular-text" id="' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '" value="' . esc_attr( $val ) . '">';
@@ -410,6 +441,13 @@ final class Service {
 		submit_button( 'Save settings' );
 		echo '</form>';
 
+		$ai = self::ai_status();
+		echo '<h2>AI sell-agent</h2>';
+		echo '<p class="trade-hint">Pick a provider above and add its API key. The Telegram bot then answers buyers as a conversational sell-agent and hands off to the Mini App with a button.</p>';
+		echo $ai['ready']
+			? '<div class="trade-ok">AI ready — ' . esc_html( $ai['label'] ) . '.</div>'
+			: '<div class="trade-warn">' . esc_html( $ai['label'] ) . ' — open the Mini App button still shows; configure a key to enable the sell-agent.</div>';
+		echo '<p class="trade-hint">Keys: <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">OpenRouter</a> · <a href="https://console.groq.com/keys" target="_blank" rel="noopener">Groq</a>. Models are OpenAI-compatible IDs, e.g. <code>openai/gpt-4o-mini</code> (OpenRouter) or <code>llama-3.3-70b-versatile</code> (Groq).</p>';
 		echo '<p class="trade-hint">Register the webhook from a shell: <code>curl -F "url=WEBHOOK_URL" -F "secret_token=YOUR_SECRET" https://api.telegram.org/botTOKEN/setWebhook</code></p>';
 		echo '<p class="trade-hint">Make the bot’s Menu button open the Mini App: <code>curl "https://api.telegram.org/botTOKEN/setChatMenuButton" -H "Content-Type: application/json" -d \'{"menu_button":{"type":"web_app","text":"Open Mini App","web_app":{"url":"MINI_APP_URL"}}}\'</code></p>';
 		echo '</div>';
