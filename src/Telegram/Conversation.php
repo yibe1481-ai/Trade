@@ -64,22 +64,27 @@ final class Conversation {
     	if ( str_starts_with( $input, 'lang:' ) ) {
     		$lang             = str_replace( 'lang:', '', $input ); // 'en' or 'am'
     		$data['language'] = $lang;
-    
+
+    		// Returning user changing language only — keep role, stay onboarded.
+    		if ( ! empty( $data['role'] ?? '' ) ) {
+    			self::save_state( $store, $user_id, 'completed', $data );
+    			$confirm = ( 'am' === $lang ) ? "🌐 ቋንቋ ተመርጧል: አማርኛ" : "🌐 Language set to: English";
+    			if ( null !== $message_id && $message_id > 0 ) {
+    				$bot->editMessageText( $chat_id, $message_id, $confirm );
+    			} else {
+    				$bot->sendMessage( $chat_id, $confirm );
+    			}
+    			return;
+    		}
+
     		self::save_state( $store, $user_id, 'awaiting_role', $data );
-    
+
     		$confirm_text = ( 'am' === $lang )
     			? "🌐 ቋንቋ ተመርጧል: አማርኛ\n\nእባክዎ ሚናዎን ይምረጡ:"
     			: "🌐 Language set to: English\n\nPlease select your role:";
-    
-    		$keyboard = array(
-    			'inline_keyboard' => array(
-    				array(
-    					array( 'text' => '🛒 Buyer', 'callback_data' => 'role:buyer' ),
-    					array( 'text' => '🏪 Seller', 'callback_data' => 'role:seller' ),
-    				),
-    			),
-    		);
-    
+
+    		$keyboard = self::role_inline_markup();
+
     		if ( null !== $message_id && $message_id > 0 ) {
     			$bot->editMessageText( $chat_id, $message_id, $confirm_text, array( 'reply_markup' => $keyboard ) );
     		} else {
@@ -92,22 +97,38 @@ final class Conversation {
     	if ( str_starts_with( $input, 'role:' ) ) {
     		$role         = str_replace( 'role:', '', $input );
     		$data['role'] = $role;
-    
+
     		self::save_state( $store, $user_id, 'completed', $data );
-    
+
     		// Buyer → open the sell-agent conversation; their next message routes to the AI (state 'completed').
     		$msg = ( 'buyer' === $role )
     			? "🤝 Welcome! I'm the Trade sell-agent.\n\nWhat are you looking for — a product or a service? Tell me what you need, your budget, and your city, and I'll help you find it."
     			: "Welcome! You can now add listings.";
-    
+
     		if ( null !== $message_id && $message_id > 0 ) {
     			$bot->editMessageText( $chat_id, $message_id, $msg );
     		} else {
     			$bot->sendMessage( $chat_id, $msg );
     		}
+    		// Anchored reply keyboard so language/role can be changed anytime.
+    		$bot->sendMessage( $chat_id, 'You can change your language or role anytime:', array( 'reply_markup' => self::anchor_markup() ) );
     		return;
     	}
-    
+
+    	// 3b. Anchored controls: change language / change role / back to home.
+    	if ( in_array( $input, array( '🌐 Language', '/language' ), true ) ) {
+    		self::send_language_menu( $chat_id, $bot, $store );
+    		return;
+    	}
+    	if ( in_array( $input, array( '🔄 Change role', '/role' ), true ) ) {
+    		$bot->sendMessage( $chat_id, 'Choose a role:', array( 'reply_markup' => self::role_inline_markup() ) );
+    		return;
+    	}
+    	if ( in_array( $input, array( '🏠 Home', '/home' ), true ) ) {
+    		$bot->sendMessage( $chat_id, 'You can change your language or role anytime, or open the Mini App:', array( 'reply_markup' => self::anchor_markup() ) );
+    		return;
+    	}
+
     	// 4. Onboarding only on an explicit /start — a plain message must never force it.
     	if ( str_starts_with( $input, '/start' ) ) {
     		self::send_language_menu( $chat_id, $bot, $store );
@@ -123,16 +144,7 @@ final class Conversation {
 
     	// 6. Mid-onboarding (language picked, role pending): nudge back on track, no menu.
     	if ( 'awaiting_role' === $current_step && ! empty( $data['language'] ?? '' ) ) {
-    		$bot->sendMessage(
-    			$chat_id,
-    			'Please choose your role to continue:',
-    			array( 'reply_markup' => array( 'inline_keyboard' => array(
-    				array(
-    					array( 'text' => '🛒 Buyer', 'callback_data' => 'role:buyer' ),
-    					array( 'text' => '🏪 Seller', 'callback_data' => 'role:seller' ),
-    				),
-    			) ) )
-    		);
+    		$bot->sendMessage( $chat_id, 'Please choose your role to continue:', array( 'reply_markup' => self::role_inline_markup() ) );
     		return;
     	}
 
@@ -433,6 +445,26 @@ final class Conversation {
 			'app_button' => true,
 			'app_params' => $app_payload,
 			'buttons'    => array_keys( self::ANCHORS ),
+		);
+	}
+
+	private static function role_inline_markup(): array {
+		return array(
+			'inline_keyboard' => array(
+				array(
+					array( 'text' => '🛒 Buyer', 'callback_data' => 'role:buyer' ),
+					array( 'text' => '🏪 Seller', 'callback_data' => 'role:seller' ),
+				),
+			),
+		);
+	}
+
+	/** Anchored reply keyboard: change language / role anytime. */
+	private static function anchor_markup(): array {
+		return array(
+			'keyboard'          => array( array( array( 'text' => '🌐 Language' ), array( 'text' => '🔄 Change role' ), array( 'text' => '🏠 Home' ) ) ),
+			'resize_keyboard'   => true,
+			'one_time_keyboard' => false,
 		);
 	}
 

@@ -11,6 +11,11 @@
 > the chat row's `data.history`; every reply carries an **Open Mini App** web_app button for handoff.
 > No provider configured → a friendly fallback reply, still with the button. Provider/keys come from
 > the admin Settings page (`trade_ai_provider`, `trade_ai_openrouter_key/model`, `trade_ai_groq_key/model`).
+>
+> **Anchored controls:** completing role selection attaches an anchored reply keyboard — 🌐 Language,
+> 🔄 Change role, 🏠 Home (or `/language`, `/role`, `/home`). Changing language keeps the role and
+> vice versa; `lang:`/`role:` callbacks from an onboarded chat re-confirm the single field and stay
+> in state `completed` instead of restarting onboarding.
 
 ## Public REST API
 | Method | Path | Params / Body | Returns | Auth | Errors |
