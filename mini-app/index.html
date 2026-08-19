@@ -29,7 +29,7 @@ body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;bac
  var qp=new URLSearchParams(location.search), filters={category:(qp.get('category')||'').trim(),location:(qp.get('location')||'').trim(),budget_max:parseInt(qp.get('budget_max')||'0',10)||0};
  async function openApp(){
   try{
-   var r=await fetch(REST+'auth/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:tg.initData})});
+   var r=await fetch(REST+'mini_app/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:tg.initData})});
    var j=await r.json(); if(!j.success){fail((j.error&&j.error.message)||'Login failed');return}
    token=j.data.session_token; ctx=j.data;
    if(filters.category){await loadResults();}else{await loadContext();}
