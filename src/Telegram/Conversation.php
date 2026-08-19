@@ -95,7 +95,10 @@ final class Conversation {
     
     		self::save_state( $store, $user_id, 'completed', $data );
     
-    		$msg = ( 'buyer' === $role ) ? "Welcome! You can now browse listings." : "Welcome! You can now add listings.";
+    		// Buyer → open the sell-agent conversation; their next message routes to the AI (state 'completed').
+    		$msg = ( 'buyer' === $role )
+    			? "🤝 Welcome! I'm the Trade sell-agent.\n\nWhat are you looking for — a product or a service? Tell me what you need, your budget, and your city, and I'll help you find it."
+    			: "Welcome! You can now add listings.";
     
     		if ( null !== $message_id && $message_id > 0 ) {
     			$bot->editMessageText( $chat_id, $message_id, $msg );
